@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+schemas/
+*.xml
+!samples/*.xml
+.pytest_cache/

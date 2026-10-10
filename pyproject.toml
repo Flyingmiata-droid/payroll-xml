@@ -1,0 +1,11 @@
+[project]
+name = "payroll-xml"
+version = "0.1.0"
+description = "Convert and check certified payroll XML (Payroll XML 1.2, TransXML based) for state DOT imports"
+requires-python = ">=3.10"
+dependencies = ["lxml>=4.9"]
+license = {text = "MIT"}
+
+[project.scripts]
+prlxml-convert = "prlxml.convert:main"
+prlxml-check = "prlxml.check:main"
