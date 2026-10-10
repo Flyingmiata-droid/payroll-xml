@@ -2,7 +2,7 @@ Open source converter and checker for certified payroll XML, the Payroll XML 1.2
 
 Today a small contractor on a state highway job fills a state spreadsheet by hand every week, uploads it to a web converter, imports the XML, reads the error log, fixes the spreadsheet, and does it all again. This tool does the convert step and the error step on your own machine, before the upload.
 
-Status: version 0, built 2026-10-10. The XML it writes validates against the published PRL 1.2 schema (`samples/week1.xml` is the proof file). It has not yet been run through a state import. Treat it as a prototype until it has.
+Status: version 0, built 2026-10-10. `samples/week1.xml`, written by this tool, passed the official AASHTOWare Project online Payroll XML validator on 2026-10-10 ("The source document is valid Payroll XML"). It has not yet been run through a state import. Treat it as a prototype until it has.
 
 ## What it does
 
