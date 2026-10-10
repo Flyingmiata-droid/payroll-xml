@@ -1,8 +1,9 @@
 """Check a Payroll XML file: schema first, then the plain-English import rules."""
 import argparse
+import re
 import sys
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from lxml import etree
@@ -17,7 +18,10 @@ def schema_errors(xml_path: Path, schema_dir: Path):
     if not xsd.exists():
         return [f"schema not found at {xsd}. Run: python -m prlxml.fetch_schemas"]
     schema = etree.XMLSchema(etree.parse(str(xsd)))
-    doc = etree.parse(str(xml_path))
+    try:
+        doc = etree.parse(str(xml_path))
+    except (etree.XMLSyntaxError, OSError):
+        return []  # rule_errors reports it
     if schema.validate(doc):
         return []
     return [f"line {e.line}: {e.message}" for e in schema.error_log]
@@ -28,13 +32,28 @@ def _t(node, tag):
     return (e.text or "").strip() if e is not None else ""
 
 
+_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
 def _d(s):
+    """YYYY-MM-DD only, a real calendar day."""
+    if not _DATE.fullmatch(s):
+        raise ValueError(s)
     return date.fromisoformat(s)
 
 
+def _num(s):
+    try:
+        d = Decimal(s)
+    except (InvalidOperation, TypeError):
+        return None
+    return d if d.is_finite() else None
+
+
 # Field lengths from the Payroll XML Project Field Definitions (xml.aashtowareproject.org, resource kit 2.1).
+# middleInitial (1) has its own rule below, so it is left out here to avoid reporting it twice.
 MAX_LEN = {
-    "vendorID": 20, "contractID": 20, "lastName": 40, "firstName": 40, "middleInitial": 1,
+    "vendorID": 20, "contractID": 20, "lastName": 40, "firstName": 40,
     "vendorSuppliedEmployeeID": 40, "ethnicity": 20, "craftCode": 20, "laborClass": 20, "projectID": 18,
     "PartialSsn": 20, "benefitProgramName": 80, "benefitAccountID": 40, "trusteeContactPerson": 40,
 }
@@ -53,18 +72,24 @@ def _len_errors(node, who):
 def rule_errors(xml_path: Path):
     """Rules copied from public state import pages and the official field definitions. Each one is a thing an import rejects."""
     errs = []
-    doc = etree.parse(str(xml_path))
+    try:
+        doc = etree.parse(str(xml_path))
+    except (etree.XMLSyntaxError, OSError) as e:
+        return [f"not well-formed XML: {e}"]
     root = doc.getroot()
     if etree.QName(root).localname != "Payroll":
         return ["root element is not Payroll"]
+    if etree.QName(root).namespace != PRL_NS:
+        return [f"Payroll XML 1.2 needs the namespace {PRL_NS}, this file has {etree.QName(root).namespace or '(none)'}"]
     errs += _len_errors(root, "")
 
+    b, e = _t(root, "payrollBeginDate"), _t(root, "payrollEndDate")
     try:
-        begin, end = _d(_t(root, "payrollBeginDate")), _d(_t(root, "payrollEndDate"))
+        begin, end = _d(b), _d(e)
         if (end - begin).days != 6:
             errs.append(f"pay period must be seven days: {begin} to {end} is {(end - begin).days + 1} days")
-    except ValueError as e:
-        errs.append(f"bad period date: {e}")
+    except ValueError:
+        errs.append(f"bad period date: begin {b!r}, end {e!r}")
         begin = end = None
 
     pn = _t(root, "payrollNumber")
@@ -105,17 +130,35 @@ def rule_errors(xml_path: Path):
                     ot = _t(hh, "overtimeHours")
                     if st == "" or ot == "":
                         errs.append(f"{who} {cls} {d}: straight and overtime hours must both be filled, use 0.00")
-                    st_sum += Decimal(st or "0")
-                    ot_sum += Decimal(ot or "0")
+                    st_n, ot_n = _num(st or "0"), _num(ot or "0")
+                    if st_n is None or ot_n is None:
+                        errs.append(f"{who} {cls} {d}: hours must be numbers, got {st!r} and {ot!r}")
+                        continue
+                    st_sum += st_n
+                    ot_sum += ot_n
             for tag, val in (("straightTimeHours", st_sum), ("overtimeHours", ot_sum)):
                 tot = _t(lab, tag)
-                if tot and Decimal(tot) != val:
-                    errs.append(f"{who} {cls}: {tag} total {tot} does not match the daily sum {val:.2f}")
+                if tot:
+                    tv = _num(tot)
+                    if tv is None:
+                        errs.append(f"{who} {cls}: {tag} total {tot!r} is not a number")
+                    elif tv != val:
+                        errs.append(f"{who} {cls}: {tag} total {tot} does not match the daily sum {val:.2f}")
+            tot = _t(lab, "totalHours")
+            if tot:
+                tv = _num(tot)
+                if tv is None:
+                    errs.append(f"{who} {cls}: totalHours {tot!r} is not a number")
+                elif tv != st_sum + ot_sum:
+                    errs.append(f"{who} {cls}: totalHours {tot} does not match the daily sum {st_sum + ot_sum:.2f}")
             gross = lab.find("p:grossPay/*/*", NS)
             ded = lab.find("p:totalDeductions/*/*", NS)
             net = lab.find("p:netPay/*/*", NS)
             if gross is not None and ded is not None and net is not None:
-                if Decimal(gross.text) - Decimal(ded.text) != Decimal(net.text):
+                g, dd, n = _num(gross.text), _num(ded.text), _num(net.text)
+                if g is None or dd is None or n is None:
+                    errs.append(f"{who} {cls}: grossPay, totalDeductions and netPay must be numbers")
+                elif g - dd != n:
                     errs.append(f"{who} {cls}: grossPay minus totalDeductions is not netPay ({gross.text} - {ded.text} != {net.text})")
     return errs
 
