@@ -34,7 +34,7 @@ Totals columns (same on every row for one employee and labor class): `gross_pay,
 
 `other_deductions` is `description:amount` pairs separated by `;`. Leave it empty when there are none.
 
-Code values for `gender`, `ethnicity`, `fringe_type`, `craft_code` and `labor_class` come from your state's own list. The tool passes them through. It does not invent them. The sample uses Wisconsin's codes (craft 100 Laborers, labor class 101 Laborer Group 1, ethnicity HISP and A-IN) as they appear on the WisDOT spreadsheet template v3.
+`gender` takes Male or Female (M and F are mapped). Code values for `ethnicity`, `fringe_type`, `craft_code` and `labor_class` come from your state's own list. The tool passes them through. It does not invent them. The sample uses Wisconsin's codes (craft 100 Laborers, labor class 101 Laborer Group 1, ethnicity HISP and A-IN) as they appear on the WisDOT spreadsheet template v3.
 
 ## Where this fits
 

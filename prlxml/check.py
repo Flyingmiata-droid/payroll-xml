@@ -32,13 +32,32 @@ def _d(s):
     return date.fromisoformat(s)
 
 
+# Field lengths from the Payroll XML Project Field Definitions (xml.aashtowareproject.org, resource kit 2.1).
+MAX_LEN = {
+    "vendorID": 20, "contractID": 20, "lastName": 40, "firstName": 40, "middleInitial": 1,
+    "vendorSuppliedEmployeeID": 40, "ethnicity": 20, "craftCode": 20, "laborClass": 20, "projectID": 18,
+    "PartialSsn": 20, "benefitProgramName": 80, "benefitAccountID": 40, "trusteeContactPerson": 40,
+}
+
+
+def _len_errors(node, who):
+    out = []
+    for tag, n in MAX_LEN.items():
+        for e in node.iterfind(f"p:{tag}", NS):
+            v = (e.text or "")
+            if len(v) > n:
+                out.append(f"{who}{tag} is {len(v)} characters, the limit is {n}")
+    return out
+
+
 def rule_errors(xml_path: Path):
-    """Rules copied from public state import pages. Each one is a thing their import rejects."""
+    """Rules copied from public state import pages and the official field definitions. Each one is a thing an import rejects."""
     errs = []
     doc = etree.parse(str(xml_path))
     root = doc.getroot()
     if etree.QName(root).localname != "Payroll":
         return ["root element is not Payroll"]
+    errs += _len_errors(root, "")
 
     try:
         begin, end = _d(_t(root, "payrollBeginDate")), _d(_t(root, "payrollEndDate"))
@@ -56,6 +75,12 @@ def rule_errors(xml_path: Path):
 
     for emp in root.iterfind(".//p:PayrollEmployee", NS):
         who = f"{_t(emp, 'lastName')}, {_t(emp, 'firstName')}"
+        errs += _len_errors(emp, who + ": ")
+        g = _t(emp, "gender")
+        if g and g not in ("Male", "Female"):
+            errs.append(f"{who}: gender must be the word Male or Female, got {g!r}")
+        if emp.find("p:changeIndicator", NS) is None:
+            errs.append(f"{who}: changeIndicator is missing; the importing system requires true or false")
         mi = _t(emp, "middleInitial")
         if len(mi) > 1:
             errs.append(f"{who}: middleInitial must be one character, got {mi!r}")
@@ -64,6 +89,7 @@ def rule_errors(xml_path: Path):
             errs.append(f"{who}: socialSecurityNumber must be 9 digits, no dashes or spaces")
         for lab in emp.iterfind(".//p:PayrollEmployeeLabor", NS):
             cls = _t(lab, "laborClass")
+            errs += _len_errors(lab, f"{who} {cls}: ")
             st_sum = ot_sum = Decimal("0")
             for h in lab.iterfind(".//p:PayrollEmployeeLaborHour", NS):
                 try:

@@ -13,8 +13,9 @@
       <middleInitial>A</middleInitial>
       <PartialSsn>1234</PartialSsn>
       <vendorSuppliedEmployeeID>E01</vendorSuppliedEmployeeID>
-      <gender>M</gender>
+      <gender>Male</gender>
       <ethnicity>HISP</ethnicity>
+      <changeIndicator>true</changeIndicator>
       <PayrollEmployeeLabors>
         <PayrollEmployeeLabor>
           <craftCode>100</craftCode>
@@ -126,8 +127,9 @@
       <middleInitial></middleInitial>
       <PartialSsn>5678</PartialSsn>
       <vendorSuppliedEmployeeID>E02</vendorSuppliedEmployeeID>
-      <gender>F</gender>
+      <gender>Female</gender>
       <ethnicity>A-IN</ethnicity>
+      <changeIndicator>true</changeIndicator>
       <PayrollEmployeeLabors>
         <PayrollEmployeeLabor>
           <craftCode>200</craftCode>

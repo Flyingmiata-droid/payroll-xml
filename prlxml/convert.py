@@ -38,6 +38,12 @@ def _bool(value: str) -> str:
     return "true" if (value or "").strip().lower() in ("1", "y", "yes", "true", "t") else "false"
 
 
+def _gender(value: str) -> str:
+    """The system takes the words Male or Female (Payroll XML Project Field Definitions). M and F are mapped; anything else passes through for the checker to flag."""
+    v = (value or "").strip()
+    return {"m": "Male", "male": "Male", "f": "Female", "female": "Female"}.get(v.lower(), v)
+
+
 def _el(parent, tag, text=None):
     e = etree.SubElement(parent, f"{{{PRL_NS}}}{tag}")
     if text is not None:
@@ -101,8 +107,10 @@ def build_tree(rows):
                 _el(emp, "socialSecurityNumber", ssn)
         if row0["employee_id"].strip():
             _el(emp, "vendorSuppliedEmployeeID", row0["employee_id"].strip())
-        _el(emp, "gender", row0["gender"].strip())
+        _el(emp, "gender", _gender(row0["gender"]))
         _el(emp, "ethnicity", row0["ethnicity"].strip())
+        # Required by the importing system even though the schema marks it optional (field definitions, row changeIndicator).
+        _el(emp, "changeIndicator", "true")
 
         labors_el = _el(emp, "PayrollEmployeeLabors")
         for lkey, dayrows in labors.items():
