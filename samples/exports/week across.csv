@@ -1,0 +1,7 @@
+Weekly Certified Payroll Detail
+Week ending 10/10/2026
+
+Emp No,Name,SSN,Sex,Ethnicity,Work Classification,Sun ST,Mon ST,Tue ST,Wed ST,Thu ST,Fri ST,Sat ST,Sun OT,Mon OT,Tue OT,Wed OT,Thu OT,Fri OT,Sat OT,Rate of Pay,OT Rate,Gross Pay,FICA,Federal Withholding,State Withholding,Medicare,Union Dues,Total Deductions,Net Pay
+E01,"Garcia, Luis A",XXX-XX-1234,M,HISP,Laborer Group 1,0,8,8,8,8,8,0,0,0,0,1,0,0,0,28.50,42.75,"$1,239.75",76.86,148.00,0.00,17.98,38.37,281.21,958.54
+E02,"Nguyen, Tran",XXX-XX-5678,F,A-IN,Carpenter,0,8,8,8,8,8,0,0,0,0,0,0,0,0,34.10,51.15,"$1,364.00",84.57,160.00,0.00,19.78,48.09,312.44,"$1,051.56"
+Totals,,,,,,0,16,16,16,16,16,0,0,0,0,1,0,0,0,,,"$2,603.75",161.43,308.00,0.00,37.76,86.46,593.65,"$2,010.10"

@@ -1,0 +1,15 @@
+Date,Employee,Job,Cost Code,Pay Class,Pay ID,Units,Rate,Description
+10/05/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,REG,8.00,28.50,
+10/05/2026,"Garcia, Luis A",SHOP,00-000,Shop,REG,2.00,22.00,yard cleanup
+10/06/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,REG,8.00,28.50,
+10/07/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,REG,8.00,28.50,
+10/07/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,OT,1.00,42.75,
+10/08/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,REG,8.00,28.50,
+10/09/2026,"Garcia, Luis A",9999-01-01,01-100,Laborer Group 1,REG,8.00,28.50,
+10/05/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,8.00,34.10,
+10/06/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,8.00,34.10,
+10/07/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,8.00,34.10,
+10/08/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,8.00,34.10,
+10/09/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,4.00,34.10,
+10/09/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,4.00,34.10,afternoon
+10/12/2026,"Nguyen, Tran",9999-01-01,02-200,Carpenter,REG,8.00,34.10,next week

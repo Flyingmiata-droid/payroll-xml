@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Payroll XML from your payroll export</title>
+<meta name="description" content="Take the file your payroll system already exports, match its columns once, and get Payroll XML 1.2 for state DOT imports. Runs in your browser. Free and open source.">
+<link rel="icon" href="data:,">
+<style>
+  @font-face { font-family: "Overpass"; src: url("fonts/overpass-400.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+  @font-face { font-family: "Overpass"; src: url("fonts/overpass-700.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+  @font-face { font-family: "Overpass"; src: url("fonts/overpass-800.woff2") format("woff2"); font-weight: 800; font-display: swap; }
+
+  :root {
+    --sign: #0a5c3b;
+    --sign-ink: #ffffff;
+    --paper: #f4f6f4;
+    --field: #ffffff;
+    --ink: #17201b;
+    --muted: #4c5a52;
+    --rule: #9fada5;
+    --stop: #b42318;
+    --stop-wash: #fbeceb;
+    --warn: #8a5a00;
+    --warn-wash: #fdf3dc;
+    --go-wash: #e7f2ec;
+    --focus: #e3a600;
+    --code: #eef1ef;
+    --ok-ink: #0a5c3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --sign: #0d6b45;
+      --sign-ink: #ffffff;
+      --paper: #06261a;
+      --field: #0b3324;
+      --ink: #e4ece7;
+      --muted: #a9bcb1;
+      --rule: #4f7463;
+      --stop: #ff8a80;
+      --stop-wash: #3a1a17;
+      --warn: #ffc533;
+      --warn-wash: #3a2e0c;
+      --go-wash: #0f4029;
+      --focus: #ffc533;
+      --code: #04201a;
+      --ok-ink: #8fe0b4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --sign: #0d6b45;
+    --sign-ink: #ffffff;
+    --paper: #06261a;
+    --field: #0b3324;
+    --ink: #e4ece7;
+    --muted: #a9bcb1;
+    --rule: #4f7463;
+    --stop: #ff8a80;
+    --stop-wash: #3a1a17;
+    --warn: #ffc533;
+    --warn-wash: #3a2e0c;
+    --go-wash: #0f4029;
+    --focus: #ffc533;
+    --code: #04201a;
+    --ok-ink: #8fe0b4;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Overpass", "Segoe UI", Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .page { max-width: 46rem; margin: 0 auto; padding: 28px 16px 56px; }
+
+  /* The one loud thing: a guide sign. */
+  .sign {
+    background: var(--sign);
+    color: var(--sign-ink);
+    border-radius: 14px;
+    padding: 7px;
+  }
+  .sign-face {
+    border: 3px solid var(--sign-ink);
+    border-radius: 9px;
+    padding: 22px 24px 20px;
+  }
+  .sign h1 {
+    margin: 0;
+    font-weight: 800;
+    font-size: clamp(2.4rem, 8vw, 3.6rem);
+    line-height: 1;
+    letter-spacing: -0.01em;
+  }
+  .sign p {
+    margin: 12px 0 0;
+    font-size: 1.15rem;
+    line-height: 1.4;
+    max-width: 34ch;
+  }
+  .stays {
+    margin: 18px 2px 30px;
+    font-weight: 700;
+  }
+  .stays span { font-weight: 400; color: var(--muted); }
+
+  /* Form boxes, the way paper payroll forms are boxed. */
+  fieldset.box {
+    margin: 0 0 28px;
+    padding: 18px 20px 20px;
+    border: 1.5px solid var(--ink);
+    border-radius: 4px;
+    background: var(--field);
+    min-width: 0;
+  }
+  fieldset.box > legend {
+    padding: 0 6px;
+    margin-left: -6px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .drop {
+    border: 2px dashed var(--rule);
+    border-radius: 4px;
+    padding: 26px 18px;
+    text-align: center;
+  }
+  .drop.over { border-color: var(--sign); border-style: solid; background: var(--go-wash); }
+  .drop-title { margin: 0 0 4px; font-size: 1.2rem; font-weight: 700; }
+  .drop-note { margin: 0 0 16px; color: var(--muted); font-size: 0.95rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .actions.left { justify-content: flex-start; }
+
+  button {
+    font: inherit;
+    font-weight: 700;
+    font-size: 1rem;
+    line-height: 1.2;
+    padding: 11px 16px 9px;
+    border-radius: 6px;
+    border: 2px solid var(--sign);
+    cursor: pointer;
+  }
+  .primary { background: var(--sign); color: var(--sign-ink); }
+  .secondary { background: transparent; color: var(--ink); border-color: var(--ink); }
+  button:focus-visible, summary:focus-visible, a:focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+  }
+  input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  [hidden] { display: none !important; }
+  .verdict { margin: 0 0 6px; font-size: 1.25rem; font-weight: 800; line-height: 1.3; }
+  .verdict.ok { color: var(--ok-ink); }
+  .verdict.bad { color: var(--stop); }
+  .facts { margin: 0 0 14px; color: var(--muted); }
+  ul.problems { margin: 0 0 16px; padding: 0; list-style: none; }
+  ul.problems li {
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    background: var(--stop-wash);
+    border-left: 4px solid var(--stop);
+    border-radius: 0 4px 4px 0;
+    overflow-wrap: anywhere;
+  }
+  ul.problems.warnings li { background: var(--warn-wash); border-left-color: var(--warn); }
+  .warn-label { margin: 0 0 6px; font-weight: 700; }
+  .not-checked { margin: 14px 0 0; font-size: 0.95rem; color: var(--muted); }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; font-weight: 700; }
+  pre {
+    margin: 10px 0 0;
+    padding: 12px;
+    max-height: 24rem;
+    overflow: auto;
+    background: var(--code);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    font: 13px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+    white-space: pre;
+  }
+
+  h2 { margin: 40px 0 10px; font-size: 1.35rem; line-height: 1.25; font-weight: 800; }
+  p { margin: 0 0 12px; }
+  a { color: inherit; text-decoration-thickness: 1.5px; text-underline-offset: 2px; }
+  .table-wrap { overflow-x: auto; margin: 12px 0 14px; border: 1.5px solid var(--ink); border-radius: 4px; background: var(--field); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+  tr:last-child td { border-bottom: 0; }
+  th { font-size: 0.85rem; color: var(--muted); }
+  @media (min-width: 521px) { th:first-child { width: 40%; } }
+  td code { font: 0.9rem ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: nowrap; }
+  ul.rules { padding-left: 1.2rem; margin: 0 0 12px; }
+  ul.rules li { margin-bottom: 4px; }
+  footer { margin-top: 44px; padding-top: 16px; border-top: 1.5px solid var(--rule); color: var(--muted); font-size: 0.95rem; }
+
+  @media (max-width: 520px) {
+    body { font-size: 16px; }
+    .sign-face { padding: 18px 16px 16px; }
+    fieldset.box { padding: 14px 14px 16px; }
+    .drop { padding: 20px 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* The mapper page: forms and wide tables on top of the converter's look. */
+  .page.wide { max-width: 58rem; }
+  .back { margin: 0 0 22px; }
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .drop.small { padding: 18px 14px; }
+  .drop .got { margin: 10px 0 0; font-size: 0.95rem; color: var(--muted); overflow-wrap: anywhere; }
+  .drop .got strong { color: var(--ink); }
+  .under { margin: 14px 0 0; }
+  #files-note { margin-top: 14px; color: var(--ink); }
+  #totals-match { margin-top: 22px; }
+  #jobs, #paytypes { margin-top: 10px; }
+  h3 { margin: 22px 0 8px; font-size: 1.05rem; font-weight: 800; }
+  h3:first-of-type { margin-top: 4px; }
+  .hint { margin: 0 0 10px; color: var(--muted); font-size: 0.95rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 10px 16px; margin: 0 0 6px; }
+  .field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .field > span { font-size: 0.9rem; font-weight: 700; }
+  .field small { color: var(--muted); font-size: 0.82rem; line-height: 1.35; }
+  select, input[type="text"], input[type="date"], input[type="number"] {
+    font: inherit;
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--field);
+    border: 1.5px solid var(--rule);
+    border-radius: 4px;
+    padding: 7px 8px 5px;
+    min-width: 0;
+    width: 100%;
+  }
+  select:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--ink); }
+  .choice { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0 0 12px; padding: 0; border: 0; }
+  .choice legend { padding: 0; margin: 0 0 4px; font-size: 0.9rem; font-weight: 700; }
+  .check { display: flex; align-items: flex-start; gap: 8px; margin: 6px 0; }
+  .check input { margin-top: 5px; flex: none; }
+  .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 2px 14px; margin: 8px 0 0; }
+  .table-wrap td input { min-width: 4.6rem; }
+  .table-wrap td select { min-width: 6.2rem; }
+  .table-wrap td { padding: 6px 8px; }
+  #workers th, #workers td.num { padding-left: 8px; padding-right: 8px; }
+  .table-wrap td.narrow input { min-width: 3.2rem; width: 3.2rem; }
+  .table-wrap td.num { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .table-wrap.preview td, .table-wrap.preview th { white-space: nowrap; font-size: 0.85rem; padding: 5px 9px; }
+  .table-wrap th { width: auto !important; }
+  ul.problems.notes li { background: var(--code); border-left-color: var(--rule); }
+  .row-number { width: 5.5rem !important; display: inline-block; }
+  @media (max-width: 620px) { .drops { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="page wide">
+  <header class="sign">
+    <div class="sign-face">
+      <h1>Payroll XML</h1>
+      <p>Start from the file your payroll system already exports. Match its columns once and get the XML your state DOT imports.</p>
+    </div>
+  </header>
+
+  <p class="stays">Your files stay on this computer. <span>The page runs in your browser and uploads nothing, SSNs included.</span></p>
+  <p class="back">Already have a CSV in this tool's own layout, or an XML file to check? Use the <a href="index.html">converter page</a>.</p>
+
+  <fieldset class="box">
+    <legend>1. Your files</legend>
+    <div class="drops">
+      <div class="drop small" id="hours-drop">
+        <p class="drop-title">Hours file</p>
+        <p class="drop-note">The export with who worked which day. CSV.</p>
+        <div class="actions">
+          <button type="button" class="primary" id="hours-choose">Choose the hours file</button>
+          <input type="file" id="hours-file" accept=".csv,.txt,.tsv,text/csv,text/plain">
+        </div>
+        <p class="got" id="hours-got" hidden></p>
+      </div>
+      <div class="drop small" id="totals-drop">
+        <p class="drop-title">Pay totals file</p>
+        <p class="drop-note">Only if gross pay, taxes and net pay are in a second export. One row per worker.</p>
+        <div class="actions">
+          <button type="button" class="secondary" id="totals-choose">Choose a pay totals file</button>
+          <input type="file" id="totals-file" accept=".csv,.txt,.tsv,text/csv,text/plain">
+          <button type="button" class="secondary" id="totals-clear" hidden>Take it out</button>
+        </div>
+        <p class="got" id="totals-got" hidden></p>
+      </div>
+    </div>
+    <div class="actions left under">
+      <button type="button" class="secondary" id="setup-choose">Load a saved setup</button>
+      <input type="file" id="setup-file" accept=".json,application/json">
+      <button type="button" class="secondary" id="sample">Try the sample export</button>
+    </div>
+    <p class="got" id="files-note" hidden></p>
+  </fieldset>
+
+  <fieldset class="box" id="match" hidden>
+    <legend>2. Match the columns</legend>
+    <p class="hint">The page made a first guess from the column names. Check each pick against the top of your file, shown here.</p>
+    <div class="table-wrap preview" id="preview"></div>
+    <p class="hint"><label>The column names are on row <input type="number" class="row-number" id="header-row" min="1" step="1"></label></p>
+
+    <fieldset class="choice">
+      <legend>The days run</legend>
+      <label class="check"><input type="radio" name="days" value="down"> <span>down the page, one row per day</span></label>
+      <label class="check"><input type="radio" name="days" value="across"> <span>across the page, a column for each day</span></label>
+    </fieldset>
+    <fieldset class="choice">
+      <legend>Straight time and overtime are</legend>
+      <label class="check"><input type="radio" name="payType" value="columns"> <span>in their own columns</span></label>
+      <label class="check"><input type="radio" name="payType" value="code"> <span>on their own rows, with a column that says which</span></label>
+    </fieldset>
+
+    <h3>The worker</h3>
+    <div class="grid" id="cols-worker"></div>
+    <h3>The work</h3>
+    <div class="grid" id="cols-work"></div>
+    <div id="jobs"></div>
+    <h3>Days, hours and rates</h3>
+    <div class="grid" id="cols-hours"></div>
+    <div id="hours-rules"></div>
+    <div id="paytypes"></div>
+    <h3>The week's pay</h3>
+    <p class="hint" id="pay-hint"></p>
+    <div class="grid" id="cols-pay"></div>
+    <div id="pay-rules"></div>
+    <details>
+      <summary>Other deductions, apprentices and extras</summary>
+      <p class="hint">Tick each column that is a deduction other than taxes: union dues, garnishments, and so on. The column name becomes the description in the XML.</p>
+      <div class="checks" id="other-hours"></div>
+      <div class="grid" id="cols-extra"></div>
+    </details>
+    <div id="totals-match" hidden>
+      <h3>The pay totals file</h3>
+      <p class="hint">Workers are matched between the two files by ID when both files have one, otherwise by name.</p>
+      <div class="grid" id="cols-totals"></div>
+      <details>
+        <summary>Other deductions in the pay totals file</summary>
+        <div class="checks" id="other-totals"></div>
+      </details>
+    </div>
+  </fieldset>
+
+  <fieldset class="box" id="payroll" hidden>
+    <legend>3. This payroll</legend>
+    <p class="hint">These are not in a payroll export. They come from your contract and your state's system.</p>
+    <div class="grid">
+      <label class="field"><span>Vendor ID</span><input type="text" id="p-vendor_id" autocomplete="off"><small>Your vendor ID with the state.</small></label>
+      <label class="field"><span>Contract ID</span><input type="text" id="p-contract_id" autocomplete="off"><small>No dashes or spaces.</small></label>
+      <label class="field"><span>Payroll number</span><input type="text" id="p-payroll_number" inputmode="numeric" autocomplete="off"><small>A whole number, 1 for the first week.</small></label>
+      <label class="field"><span>First day of the pay week</span><input type="date" id="p-period_begin"><small id="period-end">The week is seven days.</small></label>
+      <label class="field"><span>Fringe type</span>
+        <select id="p-fringe_type">
+          <option value="">Pick one</option>
+          <option>Cash</option>
+          <option>Plan Funds</option>
+          <option>Plan Funds with Exceptions</option>
+        </select>
+        <small>This tool does not write fringe programs yet. Plan Funds payrolls need those added.</small></label>
+      <label class="field" id="p-project-wrap"><span>Project ID</span><input type="text" id="p-project_id" autocomplete="off"><small>The project number on the contract.</small></label>
+    </div>
+  </fieldset>
+
+  <fieldset class="box" id="people" hidden>
+    <legend>4. Workers and classifications</legend>
+    <p class="hint">Fill in what the export does not carry. Anything you type here wins over the file. Your state says which ID it wants: the full SSN, the last 4, or your own ID.</p>
+    <div class="table-wrap" id="workers"></div>
+    <div id="classes-wrap">
+      <p class="hint">Craft codes and labor classes come from your state's own list. This tool cannot tell you if a code is wrong.</p>
+      <div class="table-wrap" id="classes"></div>
+    </div>
+  </fieldset>
+
+  <fieldset class="box" id="go" hidden>
+    <legend>5. Convert</legend>
+    <div class="actions left">
+      <button type="button" class="primary" id="convert">Convert to Payroll XML</button>
+      <button type="button" class="secondary" id="save-setup">Save this setup</button>
+    </div>
+    <label class="check"><input type="checkbox" id="keep-ssn"> <span>Keep SSNs typed on this page in the setup file. Leave this off unless the file will sit where you keep payroll.</span></label>
+    <p class="hint" id="save-note" hidden></p>
+    <p class="hint">A saved setup holds your column picks, the payroll facts, and what you typed about workers and classifications. Next week, load it with the new export.</p>
+  </fieldset>
+
+  <fieldset class="box" id="result" hidden aria-live="polite">
+    <legend id="result-name">Result</legend>
+    <p class="verdict" id="verdict"></p>
+    <p class="facts" id="facts"></p>
+    <ul class="problems" id="problems"></ul>
+    <p class="warn-label" id="warn-label" hidden>Worth a look before you upload</p>
+    <ul class="problems warnings" id="warnings" hidden></ul>
+    <p class="warn-label" id="notes-label" hidden>What the page left out or filled in</p>
+    <ul class="problems notes" id="notes" hidden></ul>
+    <div class="actions left" id="download-row" hidden>
+      <button type="button" class="primary" id="download">Download the XML</button>
+      <button type="button" class="secondary" id="download-csv">Download the matched CSV</button>
+    </div>
+    <details id="preview-wrap" hidden>
+      <summary>Show the XML</summary>
+      <pre id="xml-preview"></pre>
+    </details>
+    <p class="not-checked" id="not-checked">This page does not check the full schema. Before you upload, run the file through the <a href="https://xml.aashtowareproject.org/resourcekit/validator.html" rel="noopener noreferrer" target="_blank">official online validator</a>.</p>
+  </fieldset>
+
+  <h2>What this page reads</h2>
+  <p>A CSV file with one row of column names. The names can be anything. Title rows above the names are fine. Commas, tabs or semicolons between cells all work. For an Excel file, use File, Save As, CSV UTF-8 first.</p>
+  <ul class="rules">
+    <li>Days down the page or across it.</li>
+    <li>Straight time and overtime in their own columns, or on their own rows with a pay type column.</li>
+    <li>Hours as 7.75 or as 7:45.</li>
+    <li>Names in one column, like Garcia, Luis A or Luis A Garcia, or split into first and last.</li>
+    <li>Pay totals in the same file, or in a second file with one row per worker.</li>
+    <li>Rows for other jobs and for leave pay, which it leaves out and counts for you. Rows for other weeks too, when each row carries a date or a week ending date.</li>
+  </ul>
+
+  <h2>What it does not do</h2>
+  <p>It does not know your state's codes, so you type the craft code and labor class for each classification once and save the setup. It does not write fringe benefit programs or fringe rates. It handles one contract per file. It does not read Excel workbooks, only CSV.</p>
+  <p>It tells workers apart by ID, or by name when the file has no ID. Two workers with the same name need a worker ID column. Check how each name was split in the workers table; a name like Mary Ann Smith can split in the wrong place.</p>
+
+  <footer>
+    <p>payroll-xml is free and open source under the MIT license. Code and issues are on <a href="https://github.com/Flyingmiata-droid/payroll-xml" rel="noopener noreferrer" target="_blank">GitHub</a>. Made by Nick Kaufman.</p>
+    <p>Prototype. This page has been tested on made-up exports, built from the column layouts payroll systems publish. It has not been tested on a real export from your system. If yours does not match up, open an issue with the row of column names. Leave out names and SSNs.</p>
+  </footer>
+</main>
+<script src="prlxml.js"></script>
+<script src="mapper.js"></script>
+<script src="map-samples.js"></script>
+<script src="map-app.js"></script>
+</body>
+</html>
