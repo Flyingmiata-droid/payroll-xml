@@ -13,6 +13,7 @@ jobs:
       - run: pip install lxml pytest
       - run: npm install @xmldom/xmldom
       - run: python -m prlxml.fetch_schemas
+      - run: python -m prlxml.fetch_schemas ny
       - run: python -m prlxml.convert samples/week1.csv -o /tmp/week1.xml
       - run: python -m prlxml.check /tmp/week1.xml --schemas schemas
       - run: python -m pytest -q tests
