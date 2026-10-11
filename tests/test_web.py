@@ -2,8 +2,11 @@
 
 Writes a set of CSV and XML cases, runs the Python convert and check on each,
 runs docs/prlxml.js on the same files under Node (tests/web_parity.js), and
-compares. Converted XML must match byte for byte. Error messages must match word
-for word.
+compares. Converted XML must match byte for byte. Error and warning messages
+must match word for word.
+
+Case names: c converts clean, e is refused by convert, k converts but the check
+finds rule errors, x has rule errors, w has warnings and no rule errors.
 
 Needs node and @xmldom/xmldom on NODE_PATH. Skips without them, unless
 REQUIRE_WEB_TESTS=1 is set (CI sets it).
@@ -15,6 +18,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from lxml import etree
 
 from prlxml import check, convert
 
@@ -49,6 +53,12 @@ def _csv(lines, newline="\n"):
     return newline.join(lines) + newline
 
 
+def _with(cols, garcia, nguyen):
+    """The sample with optional columns added. garcia and nguyen are the values for each person's rows."""
+    head = HEADER + "," + ",".join(cols)
+    return _csv([head] + [d + "," + ",".join(garcia) for d in DATA[:5]] + [d + "," + ",".join(nguyen) for d in DATA[5:]])
+
+
 def csv_cases():
     c = {}
     c["c01_sample.csv"] = SAMPLE_CSV
@@ -59,9 +69,9 @@ def csv_cases():
     money = [_swap(_swap(_swap(d, "st_rate", "28.505"), "ot_rate", "42.755"), "gross_pay", '"$1,239.75"') for d in DATA[:5]]
     money[1] = _swap(money[1], "st_hours", "1.2e1")
     c["c05_rounding.csv"] = _csv([HEADER] + money + DATA[5:])
-    mixed = [_swap(_swap(d, "gender", "m"), "apprentice", "Yes") for d in DATA[:5]]
-    mixed += [_swap(d, "gender", "F") for d in DATA[5:]]
-    c["c06_gender_apprentice.csv"] = _csv([HEADER] + mixed)
+    mixed = [_swap(_swap(d, "gender", "m"), "apprentice", "Yes") + ",A-77,60" for d in DATA[:5]]
+    mixed += [_swap(d, "gender", "F") + ",," for d in DATA[5:]]
+    c["c06_gender_apprentice.csv"] = _csv([HEADER + ",apprentice_id,apprentice_pct"] + mixed)
     c["c07_full_ssn.csv"] = _csv([HEADER] + [_swap(d, "ssn", "123-45-6789") for d in DATA[:5]] + DATA[5:])
     ded = [_swap(d, "other_deductions", "Union dues:38.37; Child support: 50") for d in DATA[:5]]
     ded += [_swap(d, "other_deductions", ";;") for d in DATA[5:]]
@@ -95,7 +105,181 @@ def csv_cases():
     c["e12_gross_differs.csv"] = _csv([HEADER] + DATA[:3] + [_swap(DATA[3], "gross_pay", "1240.00")] + DATA[4:])
     c["e13_gender_differs.csv"] = _csv([HEADER] + DATA[:6] + [_swap(DATA[6], "gender", "Male")] + DATA[7:])
     c["c16_same_value_spelled_two_ways.csv"] = _csv([HEADER] + DATA[:3] + [_swap(_swap(DATA[3], "gross_pay", '"$1,239.75"'), "gender", "M")] + DATA[4:])
+    opt = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"]
+    c["c17_optional_columns.csv"] = _with(opt, ["", "57.00", "", ""], ["1364.00", "", "", ""])
+    c["c18_fringe_lowercase.csv"] = _csv([HEADER] + [_swap(d, "fringe_type", "cash") for d in DATA])
+    c["c19_apprentice_id_ignored_when_not_apprentice.csv"] = _with(["apprentice_id", "apprentice_pct"], ["A-77", "60"], ["", ""])
+    c["e14_bad_project_gross.csv"] = _with(["project_gross"], ["abc"], [""])
+    gross_rows = [d + ",1239.75" for d in DATA[:4]] + [DATA[4] + ",1240.00"] + [d + "," for d in DATA[5:]]
+    c["e15_project_gross_differs.csv"] = _csv([HEADER + ",project_gross"] + gross_rows)
+    c["k01_apprentice_without_id.csv"] = _csv([HEADER] + [_swap(d, "apprentice", "Y") for d in DATA[:5]] + DATA[5:])
+    c["k02_fringe_typo.csv"] = _csv([HEADER] + [_swap(d, "fringe_type", "Cash fringe") for d in DATA])
+    c["k03_long_cell.csv"] = _csv([HEADER] + [_swap(d, "last_name", "G" * 140000) for d in DATA[:5]] + DATA[5:])
+    c["c20_rate_decimals.csv"] = _csv([HEADER] + [_swap(_swap(d, "st_rate", "28.505"), "ot_rate", "42.7575") for d in DATA[:5]] + DATA[5:])
+    c["c21_rate_more_places_than_allowed.csv"] = _csv([HEADER] + [_swap(_swap(d, "st_rate", "28.50049"), "ot_rate", "42.757549") for d in DATA[:5]] + DATA[5:])
+    c["e16_huge_number.csv"] = _csv([HEADER] + [_swap(d, "gross_pay", "1E+300") for d in DATA[:5]] + DATA[5:])
+    c["e17_rate_differs_past_cents.csv"] = _csv([HEADER] + [_swap(d, "st_rate", "28.505") for d in DATA[:4]] + [_swap(DATA[4], "st_rate", "28.506")] + DATA[5:])
     return c
+
+
+P = "{http://www.transxml.net/schema/prl/1.2}"
+T = "{http://www.transxml.net/schema/txl/1.0}"
+
+
+def _mutate(fn):
+    root = etree.fromstring(SAMPLE_XML.encode("utf-8"))
+    fn(root)
+    return etree.tostring(root, xml_declaration=True, encoding="UTF-8").decode("utf-8")
+
+
+def _emp(root, i):
+    return root.findall(f"{P}PayrollEmployees/{P}PayrollEmployee")[i]
+
+
+def _lab(root, i):
+    return _emp(root, i).find(f"{P}PayrollEmployeeLabors/{P}PayrollEmployeeLabor")
+
+
+def _day(root, i, n):
+    return _lab(root, i).findall(f"{P}PayrollEmployeeLaborHours/{P}PayrollEmployeeLaborHour")[n]
+
+
+def _amt(node, tag):
+    return node.find(f"{P}{tag}/{T}Currency/{T}amount")
+
+
+def _set(node, path, text):
+    e = node.find(path)
+    assert e is not None, path
+    e.text = text
+
+
+def _drop(node, tag):
+    e = node.find(f"{P}{tag}")
+    assert e is not None, tag
+    node.remove(e)
+
+
+def _new(tag, text=None, kids=()):
+    e = etree.Element(f"{P}{tag}")
+    if text is not None:
+        e.text = text
+    for k in kids:
+        e.append(k)
+    return e
+
+
+def _money(tag, amount):
+    wrap = _new(tag)
+    cur = etree.SubElement(wrap, f"{T}Currency")
+    etree.SubElement(cur, f"{T}amount").text = amount
+    return wrap
+
+
+def _after(node, tag, new):
+    ref = node.find(f"{P}{tag}")
+    assert ref is not None, tag
+    ref.addnext(new)
+
+
+def _program(ptype, name="Health plan", cls=None):
+    kids = [_new("benefitProgramName", name), _new("benefitAccountID", "A1"), _new("trusteeContactPerson", "Pat Lee"),
+            _new("trusteeContactPhoneNumber", "5125550100"), _new("benefitProgramType", ptype)]
+    if cls:
+        kids.append(_new("benefitProgramClass", cls))
+    return _new("PayrollBenefitProgram", kids=kids)
+
+
+def _programs(*progs):
+    return lambda r: _after(r, "fringeBenefitPaymentType", _new("PayrollBenefitPrograms", kids=list(progs)))
+
+
+def _seq(*fns):
+    def run(r):
+        for f in fns:
+            f(r)
+    return run
+
+
+def _salaried(r):
+    emp, lab = _emp(r, 0), _lab(r, 0)
+    _after(emp, "changeIndicator", _new("salariedEmployeeIndicator", "true"))
+    _drop(lab, "straightTimeHourlyRate")
+    _drop(lab, "overtimeHourlyRate")
+    _set(lab, f"{P}totalHours", "40.00")
+    for n in range(5):
+        day = _day(r, 0, n)
+        day.replace(day.find(f"{P}hourlyHours"), _new("salariedEmployeeHours", "8.00"))
+
+
+def _no_tax(r):
+    for tag in ("fICAAmount", "federalWithholdingTaxAmount", "stateWithholdingTaxAmount", "medicareAmount"):
+        _drop(_lab(r, 0), tag)
+
+
+def _drop_zero_ot(r):
+    for n in range(5):
+        hh = _day(r, 0, n).find(f"{P}hourlyHours")
+        if hh.find(f"{P}overtimeHours").text == "0.00":
+            hh.remove(hh.find(f"{P}overtimeHours"))
+
+
+def _time_zones(r):
+    _set(r, f"{P}payrollBeginDate", "2026-10-04-05:00")
+    _set(r, f"{P}payrollEndDate", "2026-10-10-05:00")
+    for n in range(5):
+        _set(_day(r, 0, n), f"{P}laborHourDate", _day(r, 0, n).find(f"{P}laborHourDate").text + "Z")
+
+
+def tree_cases():
+    """Planted changes made on the parsed sample. x: rule errors (or clean, see CLEAN_XML). w: warnings and no rule errors."""
+    ruiz = _new("PayrollEmployee", kids=[_new("lastName", "Ruiz"), _new("firstName", "Ana"), _new("middleInitial", ""),
+                                         _new("PartialSsn", "9012"), _new("gender", "Female"), _new("ethnicity", "HISP"), _new("changeIndicator", "true")])
+    spec = {
+        "x26_fringe_type_lowercase.xml": lambda r: _set(r, f"{P}fringeBenefitPaymentType", "cash"),
+        "x27_no_straight_rate.xml": lambda r: _drop(_lab(r, 0), "straightTimeHourlyRate"),
+        "x28_zero_rate.xml": lambda r: setattr(_amt(_lab(r, 0), "straightTimeHourlyRate"), "text", "0.00"),
+        "x29_apprentice_no_id.xml": lambda r: _set(_lab(r, 0), f"{P}apprentice", "true"),
+        "x30_ojt_no_percentage.xml": lambda r: _set(_lab(r, 0), f"{P}ojtProgramIndicator", "true"),
+        "x31_negative_hours.xml": _seq(lambda r: _set(_day(r, 0, 0), f"{P}hourlyHours/{P}overtimeHours", "-1.00"),
+                                       lambda r: _set(_day(r, 0, 2), f"{P}hourlyHours/{P}overtimeHours", "2.00")),
+        "x32_no_project_gross.xml": lambda r: _drop(_lab(r, 0), "grossProjectAmountEarned"),
+        "x33_no_employee_id.xml": _seq(lambda r: _drop(_emp(r, 0), "PartialSsn"), lambda r: _drop(_emp(r, 0), "vendorSuppliedEmployeeID")),
+        "x34_deduction_twice.xml": lambda r: _lab(r, 0).find(f"{P}PayrollEmployeeOtherDeductions").append(
+            _new("PayrollEmployeeOtherDeduction", kids=[_new("description", "Union dues"), _money("amount", "0.00")])),
+        "x35_salaried_with_rates.xml": lambda r: _after(_emp(r, 0), "changeIndicator", _new("salariedEmployeeIndicator", "true")),
+        "x36_program_bad_type.xml": _programs(_program("Health")),
+        "x37_fringe_rate_zero.xml": lambda r: _after(_lab(r, 0), "overtimeHourlyRate", _money("healthWellfareRate", "0.00")),
+        "x38_no_total_hours.xml": lambda r: _drop(_lab(r, 0), "totalHours"),
+        "x39_salaried_hours_for_hourly.xml": lambda r: _day(r, 0, 0).replace(_day(r, 0, 0).find(f"{P}hourlyHours"), _new("salariedEmployeeHours", "8.00")),
+        "x40_long_comment.xml": lambda r: _after(r, "fringeBenefitPaymentType", _new("comments", "x" * 257)),
+        "x41_program_other_no_class.xml": _programs(_program("Fringe Other 1")),
+        "x42_two_programs_same_name.xml": _programs(_program("Fringe Pension"), _program("Fringe Health/Welfare")),
+        "w01_duplicate_day.xml": lambda r: _set(_day(r, 0, 1), f"{P}laborHourDate", "2026-10-05"),
+        "w02_deductions_do_not_add_up.xml": lambda r: setattr(_amt(_lab(r, 1).find(f"{P}PayrollEmployeeOtherDeductions/{P}PayrollEmployeeOtherDeduction"), "amount"), "text", "40.00"),
+        "w03_underpaid_on_project.xml": lambda r: setattr(_amt(_lab(r, 1), "grossProjectAmountEarned"), "text", "400.00"),
+        "w04_gross_below_project.xml": lambda r: setattr(_amt(_lab(r, 0), "grossProjectAmountEarned"), "text", "1300.00"),
+        "w05_overtime_rate_low.xml": lambda r: setattr(_amt(_lab(r, 0), "overtimeHourlyRate"), "text", "20.00"),
+        "w06_zero_hours_employee.xml": lambda r: r.find(f"{P}PayrollEmployees").append(ruiz),
+        "w07_same_name_twice.xml": _seq(lambda r: _set(_emp(r, 1), f"{P}lastName", "Garcia"), lambda r: _set(_emp(r, 1), f"{P}firstName", "Luis")),
+        "w08_plan_funds_no_rates.xml": lambda r: _set(r, f"{P}fringeBenefitPaymentType", "Plan Funds"),
+        "w09_exceptions_none.xml": lambda r: _set(r, f"{P}fringeBenefitPaymentType", "Plan Funds with Exceptions"),
+        "w10_long_day.xml": _seq(lambda r: _set(_day(r, 0, 0), f"{P}hourlyHours/{P}straightTimeHours", "24.00"),
+                                 lambda r: _set(_day(r, 0, 1), f"{P}hourlyHours/{P}straightTimeHours", "0.00"),
+                                 lambda r: _set(_day(r, 0, 2), f"{P}hourlyHours/{P}straightTimeHours", "0.00"),
+                                 lambda r: _set(_day(r, 0, 2), f"{P}laborHourDate", "2026-10-05")),
+        "w11_grosspay_underpaid.xml": _seq(lambda r: setattr(_amt(_lab(r, 1), "grossPay"), "text", "1000.00"),
+                                           lambda r: setattr(_amt(_lab(r, 1), "netPay"), "text", "687.56")),
+        "w12_no_daily_overtime.xml": _drop_zero_ot,
+        "w13_overtime_rate_zero_no_overtime.xml": lambda r: setattr(_amt(_lab(r, 1), "overtimeHourlyRate"), "text", "0.00"),
+        "x45_overtime_rate_zero_with_overtime.xml": lambda r: setattr(_amt(_lab(r, 0), "overtimeHourlyRate"), "text", "0.00"),
+        "x46_no_tax_fields.xml": _no_tax,
+        "x47_dates_with_time_zone.xml": _time_zones,
+        "x48_salaried_employee.xml": _salaried,
+        "x49_huge_rate.xml": lambda r: setattr(_amt(_lab(r, 0), "straightTimeHourlyRate"), "text", "1E+300"),
+        "x50_fullwidth_payroll_number.xml": lambda r: _set(r, f"{P}payrollNumber", "\uff11"),
+    }
+    return {name: _mutate(fn) for name, fn in spec.items()}
 
 
 def xml_cases():
@@ -128,6 +312,9 @@ def xml_cases():
     c["x23_cp1252_says_utf8.xml"] = s.replace("<lastName>Garcia<", "<lastName>Mu\u00f1oz<").encode("cp1252")
     c["x24_utf8_says_utf16.xml"] = s.replace("encoding='UTF-8'", "encoding='utf-16'")
     c["x25_cut_off.xml"] = s[: len(s) // 2]
+    c["x43_cut_off_third.xml"] = s[: len(s) // 3]
+    c["x44_cut_off_end.xml"] = s[: len(s) - 12]
+    c.update(tree_cases())
     for name, text in c.items():
         assert name == "x01_sample.xml" or text != s, f"{name}: the planted change did not land"
     assert c["x23_cp1252_says_utf8.xml"] != c["x01_sample.xml"].encode("cp1252")
@@ -145,7 +332,8 @@ def python_results(folder: Path):
             except convert.ConvertError as e:
                 out[f.name] = {"error": str(e)}
         elif f.suffix == ".xml":
-            out[f.name] = {"errors": check.rule_errors(f)}
+            errs, warns = check.scan(f)
+            out[f.name] = {"errors": errs, "warnings": warns}
     return out
 
 
@@ -180,7 +368,7 @@ def test_excel_habits_still_give_the_validated_file(tmp_path):
 
 
 @needs_node
-def test_browser_sample_is_the_validated_file(tmp_path):
+def test_browser_sample_is_the_repo_sample(tmp_path):
     (tmp_path / "week1.csv").write_text(SAMPLE_CSV, encoding="utf-8")
     r = subprocess.run(["node", str(ROOT / "tests/web_parity.js"), str(tmp_path)], capture_output=True, text=True, encoding="utf-8")
     assert r.returncode == 0, r.stderr
@@ -193,16 +381,22 @@ def test_page_sample_matches_repo_sample():
         assert f'"{line}"' in js
 
 
-CLEAN_XML = {"x01_sample.xml", "x18_padded_text.xml", "x20_comment_in_text.xml", "x22_utf16_bom.xml"}
+CLEAN_XML = {"x01_sample.xml", "x18_padded_text.xml", "x20_comment_in_text.xml", "x22_utf16_bom.xml",
+             "x46_no_tax_fields.xml", "x47_dates_with_time_zone.xml", "x48_salaried_employee.xml"}
 
 
 def test_python_catches_every_planted_error(tmp_path):
-    """Runs without Node. Every planted XML error is reported, every bad CSV is refused, every good CSV converts clean."""
+    """Runs without Node. Every planted XML error and warning is reported, every bad CSV is refused, every good CSV converts clean."""
     for name, text in xml_cases().items():
         f = tmp_path / name
         f.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
-        errs = check.rule_errors(f)
-        assert bool(errs) == (name not in CLEAN_XML), (name, errs)
+        errs, warns = check.scan(f)
+        if name.startswith("w"):
+            assert errs == [] and warns, (name, errs, warns)
+        else:
+            assert bool(errs) == (name not in CLEAN_XML), (name, errs)
+        if name in CLEAN_XML:
+            assert warns == [], (name, warns)
     for name, text in csv_cases().items():
         f = tmp_path / name
         f.write_bytes(text if isinstance(text, bytes) else text.encode("utf-8"))
@@ -212,4 +406,71 @@ def test_python_catches_every_planted_error(tmp_path):
                 convert.convert(f, out)
         else:
             convert.convert(f, out)
-            assert check.rule_errors(out) == [], name
+            assert bool(check.rule_errors(out)) == name.startswith("k"), (name, check.rule_errors(out))
+
+
+def test_each_new_rule_says_what_it_found(tmp_path):
+    """The planted change is the thing reported, not some other rule tripping by chance."""
+    want = {
+        "x26_fringe_type_lowercase.xml": "fringeBenefitPaymentType must be Cash, Plan Funds, or Plan Funds with Exceptions, got 'cash'",
+        "x27_no_straight_rate.xml": "Garcia, Luis 101: straightTimeHourlyRate is required for an hourly employee",
+        "x28_zero_rate.xml": "Garcia, Luis 101: straightTimeHourlyRate must be more than 0, got 0.00",
+        "x29_apprentice_no_id.xml": "Garcia, Luis 101: apprenticeID is required when apprentice is true",
+        "x30_ojt_no_percentage.xml": "Garcia, Luis 101: ojtWagePercentage is required when ojtProgramIndicator is true",
+        "x31_negative_hours.xml": "Garcia, Luis 101 2026-10-05: hours cannot be below 0",
+        "x32_no_project_gross.xml": "Garcia, Luis 101: grossProjectAmountEarned is required, the pay for this contract and project only",
+        "x33_no_employee_id.xml": "Garcia, Luis: no employee ID; give socialSecurityNumber, PartialSsn or vendorSuppliedEmployeeID, whichever your state asks for",
+        "x34_deduction_twice.xml": "Garcia, Luis 101: other deduction 'Union dues' is listed twice; each description must be unique",
+        "x35_salaried_with_rates.xml": "Garcia, Luis 101: a salaried employee has no straightTimeHourlyRate or overtimeHourlyRate; take them out",
+        "x36_program_bad_type.xml": "benefit program 1: benefitProgramType must be one of Fringe Health/Welfare, Fringe Vacation/Holiday, Fringe Apprenticeship Fund, Fringe Pension, Fringe Other 1, Fringe Other 2, got 'Health'",
+        "x37_fringe_rate_zero.xml": "Garcia, Luis 101: healthWellfareRate must be more than 0 when it is in the file, got 0.00",
+        "x38_no_total_hours.xml": "Garcia, Luis 101: totalHours is required",
+        "x39_salaried_hours_for_hourly.xml": "Garcia, Luis 101 2026-10-05: salariedEmployeeHours is only for a salaried employee; use straightTimeHours and overtimeHours",
+        "x40_long_comment.xml": "comments is 257 characters, the limit is 256",
+        "x41_program_other_no_class.xml": "benefit program 1: benefitProgramClass is required for Fringe Other 1",
+        "x42_two_programs_same_name.xml": "benefit program 2: benefitProgramName 'Health plan' is used twice; each program needs its own name",
+        "w01_duplicate_day.xml": "Garcia, Luis 101: 2026-10-05 is listed twice; merge it into one day",
+        "w02_deductions_do_not_add_up.xml": "Nguyen, Tran 201: FICA, federal, state, Medicare and other deductions add up to 304.35, but totalDeductions is 312.44; totalDeductions should include all taxes and other deductions",
+        "w03_underpaid_on_project.xml": "Nguyen, Tran 201: grossProjectAmountEarned 400.00 is less than the hours times the rates (1364.00); that reads as underpayment",
+        "w04_gross_below_project.xml": "Garcia, Luis 101: grossPay 1239.75 is less than grossProjectAmountEarned 1300.00; gross pay should be the project pay plus any other pay",
+        "w05_overtime_rate_low.xml": "Garcia, Luis 101: overtime rate 20.00 is lower than the straight rate 28.50",
+        "w06_zero_hours_employee.xml": "Ruiz, Ana: no hours on this payroll; a state that sets Include Employees with Zero Hours to False rejects the file",
+        "w07_same_name_twice.xml": "Garcia, Luis: listed as 2 separate employees; if this is one person, put all of their labor lines under one employee",
+        "w08_plan_funds_no_rates.xml": "Garcia, Luis 101: fringe type is Plan Funds but this line has no fringe rate; fill at least one fringe rate and fringeBenefits",
+        "w09_exceptions_none.xml": "fringe type is Plan Funds with Exceptions, but no employee has a fringe benefit exception",
+        "w10_long_day.xml": "Garcia, Luis: 2026-10-05 adds up to 25.00 hours, more than a day holds",
+        "w11_grosspay_underpaid.xml": "Nguyen, Tran 201: grossPay 1000.00 is less than the hours times the rates (1364.00); that reads as underpayment",
+        "w12_no_daily_overtime.xml": "Garcia, Luis 101 2026-10-05: overtimeHours is left out; Wisconsin's import wants 0.00 on a day with no overtime",
+        "w13_overtime_rate_zero_no_overtime.xml": "Nguyen, Tran 201: overtimeHourlyRate is 0.00; some states want a rate above 0 even with no overtime",
+        "x45_overtime_rate_zero_with_overtime.xml": "Garcia, Luis 101: overtimeHourlyRate must be more than 0 when there is overtime, got 0.00",
+        "x49_huge_rate.xml": "Garcia, Luis 101: straightTimeHourlyRate '1E+300' is not a number",
+        "x50_fullwidth_payroll_number.xml": "payrollNumber must be a whole number starting at 1, got '\uff11'",
+    }
+    cases = {k: v for k, v in tree_cases().items() if k not in CLEAN_XML}
+    assert sorted(want) == sorted(cases)
+    for name, line in want.items():
+        f = tmp_path / name
+        f.write_text(cases[name], encoding="utf-8")
+        errs, warns = check.scan(f)
+        assert line in (warns if name.startswith("w") else errs), (name, errs, warns)
+
+
+def test_rates_keep_their_decimals(tmp_path):
+    """The field definitions allow 3 places on the straight time rate and 4 on overtime. Rounding them to cents changed the pay."""
+    cases = csv_cases()
+    f = tmp_path / "c20.csv"
+    f.write_text(cases["c20_rate_decimals.csv"], encoding="utf-8")
+    out = tmp_path / "c20.xml"
+    convert.convert(f, out)
+    xml = out.read_text(encoding="utf-8")
+    assert "<txl:amount>28.505</txl:amount>" in xml and "<txl:amount>42.7575</txl:amount>" in xml
+    assert "<txl:amount>1182.96</txl:amount>" in xml  # 28.505 x 40 + 42.7575 x 1 = 1182.9575
+    f.write_text(cases["c21_rate_more_places_than_allowed.csv"], encoding="utf-8")
+    convert.convert(f, out)
+    xml = out.read_text(encoding="utf-8")
+    assert "<txl:amount>28.500</txl:amount>" in xml and "<txl:amount>42.7575</txl:amount>" in xml
+
+
+def test_sample_has_no_warnings():
+    errs, warns = check.scan(ROOT / "samples/week1.xml")
+    assert errs == [] and warns == []

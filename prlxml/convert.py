@@ -5,7 +5,7 @@ import io
 import re
 import sys
 from collections import OrderedDict
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, localcontext
 from pathlib import Path
 
 from lxml import etree
@@ -20,32 +20,61 @@ LABOR_COLS = ["craft_code", "labor_class", "project_id", "apprentice", "st_rate"
 DAY_COLS = ["work_date", "st_hours", "ot_hours"]
 TOTAL_COLS = ["gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"]
 REQUIRED = HEADER_COLS + EMP_COLS + LABOR_COLS + DAY_COLS + TOTAL_COLS
+# Optional columns. Leave them out or blank when they do not apply.
+# project_gross: pay for this contract and project only. Blank means rates times hours plus lump_sum.
+# lump_sum: cash fringe or other cash paid on this line. apprentice_id, apprentice_pct: needed when apprentice is yes.
+OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"]
 DATE_COLS = ["period_begin", "period_end", "work_date"]
 SAME_FOR_EMPLOYEE = ["middle_initial", "gender", "ethnicity"]
-SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"]
-NUMBER_COLS = {"st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare"}
+SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"] + OPTIONAL
+NUMBER_COLS = {"st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct"}
 
 ENCODING_HELP = "Cannot tell this file's text encoding, so accented names could come out wrong. In Excel, save it again with File, Save As, CSV UTF-8."
 _BAD_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 _US_DATE = re.compile(r"([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})")
+# Plain ASCII decimals only, the same numbers docs/prlxml.js accepts.
+_NUM = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+# The field definitions allow 3 decimals on the straight time rate and 4 on the overtime rate. Rates keep what was typed, up to that.
+RATE_PLACES = {"st_rate": 3, "ot_rate": 4}
 
 
 class ConvertError(Exception):
     pass
 
 
-def _dec(value: str, field: str, row_no: int) -> Decimal:
+def _parse(value: str, field: str, row_no: int):
+    """A Decimal, None for a blank cell. Refuses anything that is not a plain number of sane size."""
     v = (value or "").strip().replace("$", "").replace(",", "")
     if v == "":
+        return None
+    bad = ConvertError(f"row {row_no}: {field} is not a number: {value!r}")
+    if not _NUM.fullmatch(v):
+        raise bad
+    d = Decimal(v)
+    t = d.as_tuple()
+    if len(t.digits) > 100 or not -100 <= t.exponent <= 100:
+        raise bad
+    return d
+
+
+def _places(d: Decimal, keep: int) -> Decimal:
+    with localcontext() as ctx:
+        ctx.prec = 1000
+        q = d.quantize(Decimal(1).scaleb(-keep), rounding=ROUND_HALF_EVEN)
+    return q.copy_abs() if q == 0 else q  # no -0.00, which Excel float leftovers like -1.1E-13 would give
+
+
+def _dec(value: str, field: str, row_no: int) -> Decimal:
+    d = _parse(value, field, row_no)
+    return Decimal("0.00") if d is None else _places(d, 2)
+
+
+def _rate(value: str, field: str, row_no: int) -> Decimal:
+    """Keeps the decimals typed: at least 2, at most 3 (straight time) or 4 (overtime)."""
+    d = _parse(value, field, row_no)
+    if d is None:
         return Decimal("0.00")
-    try:
-        d = Decimal(v)
-    except InvalidOperation as e:
-        raise ConvertError(f"row {row_no}: {field} is not a number: {value!r}") from e
-    if not d.is_finite():
-        raise ConvertError(f"row {row_no}: {field} is not a number: {value!r}")
-    q = d.quantize(Decimal("0.01"))
-    return q if q else Decimal("0.00")  # no -0.00, which Excel float leftovers like -1.1E-13 would give
+    return _places(d, min(max(-d.as_tuple().exponent, 2), RATE_PLACES[field]))
 
 
 def _bool(value: str) -> str:
@@ -58,6 +87,12 @@ def _gender(value: str) -> str:
     return {"m": "Male", "male": "Male", "f": "Female", "female": "Female"}.get(v.lower(), v)
 
 
+def _fringe(value: str) -> str:
+    """The field definitions allow Cash, Plan Funds, or Plan Funds with Exceptions. Case is fixed; anything else passes through for the checker to flag."""
+    v = (value or "").strip()
+    return {"cash": "Cash", "plan funds": "Plan Funds", "plan funds with exceptions": "Plan Funds with Exceptions"}.get(v.lower(), v)
+
+
 def _el(parent, tag, text=None):
     e = etree.SubElement(parent, f"{{{PRL_NS}}}{tag}")
     if text is not None:
@@ -68,7 +103,8 @@ def _el(parent, tag, text=None):
 def _currency(parent, tag, amount: Decimal):
     wrap = _el(parent, tag)
     cur = etree.SubElement(wrap, f"{{{TXL_NS}}}Currency")
-    etree.SubElement(cur, f"{{{TXL_NS}}}amount").text = f"{amount:.2f}"
+    places = max(-amount.as_tuple().exponent, 2)
+    etree.SubElement(cur, f"{{{TXL_NS}}}amount").text = f"{amount:.{places}f}"
     return wrap
 
 
@@ -96,6 +132,7 @@ def _iso(value: str) -> str:
 
 def read_rows(path: Path):
     text = decode(Path(path).read_bytes())
+    csv.field_size_limit(max(csv.field_size_limit(), len(text) + 1))  # a long cell is the checker's business, not a crash
     text = re.sub(r"\A(?:\r\n|\r|\n)+", "", text)
     reader = csv.DictReader(io.StringIO(text, newline=""))
     if reader.fieldnames:
@@ -109,7 +146,9 @@ def read_rows(path: Path):
         # Spreadsheet exports often end with rows of bare commas. Skip them.
         if not any(v.strip() for v in row.values()):
             continue
-        for c in REQUIRED:
+        for c in OPTIONAL:
+            row.setdefault(c, "")
+        for c in REQUIRED + OPTIONAL:
             if _BAD_CHARS.search(row[c]):
                 raise ConvertError(f"row {n}: {c} holds a control character XML cannot carry: {row[c]!r}")
         for c in DATE_COLS:
@@ -137,7 +176,7 @@ def build_tree(rows):
     _el(root, "payrollNumber", int(pn))
     _el(root, "payrollBeginDate", first["period_begin"].strip())
     _el(root, "payrollEndDate", first["period_end"].strip())
-    _el(root, "fringeBenefitPaymentType", first["fringe_type"].strip())
+    _el(root, "fringeBenefitPaymentType", _fringe(first["fringe_type"]))
 
     # group: employee -> labor class -> day rows
     employees = OrderedDict()
@@ -149,6 +188,8 @@ def build_tree(rows):
 
     # The XML holds these once per employee or labor line, taken from the first row. A different value on a later row would be lost, so stop.
     def same(col, r, n):
+        if col in RATE_PLACES:
+            return _rate(r[col], col, n)
         if col in NUMBER_COLS:
             return _dec(r[col], col, n)
         if col == "gender":
@@ -195,9 +236,19 @@ def build_tree(rows):
             _el(lab, "laborClass", l0["labor_class"].strip())
             _el(lab, "projectID", l0["project_id"].strip())
             _el(lab, "ojtProgramIndicator", "false")
-            _currency(lab, "straightTimeHourlyRate", _dec(l0["st_rate"], "st_rate", n0))
-            _currency(lab, "overtimeHourlyRate", _dec(l0["ot_rate"], "ot_rate", n0))
+            st_rate = _rate(l0["st_rate"], "st_rate", n0)
+            ot_rate = _rate(l0["ot_rate"], "ot_rate", n0)
+            _currency(lab, "straightTimeHourlyRate", st_rate)
+            _currency(lab, "overtimeHourlyRate", ot_rate)
+            lump = _dec(l0["lump_sum"], "lump_sum", n0)
+            if l0["lump_sum"].strip():
+                _currency(lab, "lumpSumPayment", lump)
             _el(lab, "apprentice", _bool(l0["apprentice"]))
+            if _bool(l0["apprentice"]) == "true":
+                if l0["apprentice_id"].strip():
+                    _el(lab, "apprenticeID", l0["apprentice_id"].strip())
+                if l0["apprentice_pct"].strip():
+                    _el(lab, "apprenticeWagePercentage", f"{_dec(l0['apprentice_pct'], 'apprentice_pct', n0):.2f}")
 
             st_total = Decimal("0.00")
             ot_total = Decimal("0.00")
@@ -215,6 +266,14 @@ def build_tree(rows):
             _currency(lab, "grossPay", _dec(l0["gross_pay"], "gross_pay", n0))
             _currency(lab, "totalDeductions", _dec(l0["total_deductions"], "total_deductions", n0))
             _currency(lab, "netPay", _dec(l0["net_pay"], "net_pay", n0))
+            # Required by the field definitions though the schema marks it optional. The state spreadsheets fill it in too.
+            if l0["project_gross"].strip():
+                project = _dec(l0["project_gross"], "project_gross", n0)
+            else:
+                with localcontext() as ctx:
+                    ctx.prec = 1000
+                    project = _places(st_rate * st_total + ot_rate * ot_total + lump, 2)
+            _currency(lab, "grossProjectAmountEarned", project)
             _currency(lab, "fICAAmount", _dec(l0["fica"], "fica", n0))
             _currency(lab, "federalWithholdingTaxAmount", _dec(l0["federal_tax"], "federal_tax", n0))
             _currency(lab, "stateWithholdingTaxAmount", _dec(l0["state_tax"], "state_tax", n0))

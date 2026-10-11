@@ -51,6 +51,11 @@
               <txl:amount>958.54</txl:amount>
             </txl:Currency>
           </netPay>
+          <grossProjectAmountEarned>
+            <txl:Currency>
+              <txl:amount>1182.75</txl:amount>
+            </txl:Currency>
+          </grossProjectAmountEarned>
           <fICAAmount>
             <txl:Currency>
               <txl:amount>76.86</txl:amount>
@@ -165,6 +170,11 @@
               <txl:amount>1051.56</txl:amount>
             </txl:Currency>
           </netPay>
+          <grossProjectAmountEarned>
+            <txl:Currency>
+              <txl:amount>1364.00</txl:amount>
+            </txl:Currency>
+          </grossProjectAmountEarned>
           <fICAAmount>
             <txl:Currency>
               <txl:amount>84.57</txl:amount>
@@ -222,6 +232,16 @@
               </hourlyHours>
             </PayrollEmployeeLaborHour>
           </PayrollEmployeeLaborHours>
+          <PayrollEmployeeOtherDeductions>
+            <PayrollEmployeeOtherDeduction>
+              <description>Union dues</description>
+              <amount>
+                <txl:Currency>
+                  <txl:amount>48.09</txl:amount>
+                </txl:Currency>
+              </amount>
+            </PayrollEmployeeOtherDeduction>
+          </PayrollEmployeeOtherDeductions>
         </PayrollEmployeeLabor>
       </PayrollEmployeeLabors>
     </PayrollEmployee>

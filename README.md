@@ -2,13 +2,36 @@ Open source converter and checker for certified payroll XML, the Payroll XML 1.2
 
 Today a small contractor on a state highway job fills a state spreadsheet by hand every week, uploads it to a web converter, imports the XML, reads the error log, fixes the spreadsheet, and does it all again. This tool does the convert step and the error step on your own machine, before the upload.
 
-Status: version 0, built 2026-10-10. `samples/week1.xml`, written by this tool, passed the official AASHTOWare Project online Payroll XML validator on 2026-10-10 ("The source document is valid Payroll XML"). It has not yet been run through a state import. Treat it as a prototype until it has.
+Status: version 0, built 2026-10-10. An earlier `samples/week1.xml`, written by this tool, passed the official AASHTOWare Project online Payroll XML validator on 2026-10-10 ("The source document is valid Payroll XML"). The current sample adds the `grossProjectAmountEarned` field and passes the published schema. No file from this tool has been run through a state import yet. Treat it as a prototype until one has.
 
 ## What it does
 
-`convert` turns a flat CSV (one row per employee, per labor class, per day) into a Payroll XML file. It fills blank hours with 0.00 and strips dashes from SSNs on the way. Rates, weekly totals, gender and the other values the XML holds once per worker must match on every row for that worker; if one differs, convert stops and names the row instead of keeping the first value.
+`convert` turns a flat CSV (one row per employee, per labor class, per day) into a Payroll XML file. It fills blank hours with 0.00 and strips dashes from SSNs on the way. Rates, weekly totals, gender and the other values the XML holds once per worker must match on every row for that worker; if one differs, convert stops and names the row instead of keeping the first value. It writes `grossProjectAmountEarned`, which the field definitions require even though the schema marks it optional: the `project_gross` column if you give one, otherwise the rates times the hours plus any lump sum. The state spreadsheets also fill this field in for you. Rates keep the decimals you typed, up to 3 for straight time and 4 for overtime, as the field definitions allow.
 
-`check` validates a Payroll XML file against the published schema, then runs the plain-English rules state import pages publish: a payroll number of 1 or more, a seven-day period, dates inside the period, hours filled with 0.00, daily hours that add up to the straight time, overtime and total hours, SSN with no dashes, a one-character middle initial, gross minus deductions equal to net pay, and the field length limits. It works on Payroll XML from any tool, including ones your payroll software exports.
+`check` validates a Payroll XML file against the published schema, then runs plain-English rules taken from the official AASHTO Payroll XML Project Field Definitions (resource kit 2.1) and from state import pages. It works on Payroll XML from any tool, including the files your payroll software exports.
+
+Rule errors are things the field definitions require or a state import rejects. Most of them pass the schema, so a schema validator will not catch them.
+
+- a payroll number of 1 or more, a seven-day period, and every day worked inside it
+- straight time hours on every day (0.00 when none), no hours below 0, and daily hours that add up to the straight time, overtime and total hours
+- a straight time rate above 0 and an overtime rate on every hourly line (above 0 when there is overtime), and neither on a salaried one
+- total hours, straight time hours, gross pay, deductions, net pay and `grossProjectAmountEarned` on every labor line
+- gross pay minus deductions equal to net pay
+- an employee ID of some kind, an SSN with no dashes, a one-character middle initial, gender as Male or Female
+- a fringe type of Cash, Plan Funds, or Plan Funds with Exceptions
+- apprentice ID and wage percentage on apprentice lines, OJT wage percentage on OJT lines
+- fringe rates above 0, one description per other deduction, and complete fringe benefit programs with a valid type
+- the field length limits
+
+Warnings are things a state reviewer would question, or that some states reject depending on their agency options. They print as `WARN` and do not change the exit code.
+
+- pay below the hours times the rates
+- taxes and other deductions that do not add up to the total deductions, or gross pay below the project pay
+- the same day twice on one labor line, or more than 24 hours in one day
+- an overtime rate of 0.00, or below the straight time rate
+- a day with no overtime field (Wisconsin wants 0.00)
+- a worker with no hours, or one name listed as two workers
+- a Plan Funds line with no fringe rate
 
 ## Quick start
 
@@ -20,13 +43,25 @@ Needs Python 3.10 or newer and `lxml`.
 
 ## In your browser
 
+Use it at https://flyingmiata-droid.github.io/payroll-xml/
+
 `docs/index.html` is the same converter and the same rule checks as one web page. Open it, drop a CSV or a Payroll XML file, and download the XML. Everything runs in the browser tab. The page sends nothing anywhere, and its content security policy blocks every outside request, so SSNs stay on the machine.
 
 The page does not run the schema check, because the AASHTO schema files are not redistributed here. For that, use the Python tool or the official online validator at https://xml.aashtowareproject.org/resourcekit/validator.html.
 
-The page gives the same answers as the Python tool. `tests/test_web.py` runs both on a set of CSV and XML cases and compares them: converted XML byte for byte, rule and convert messages word for word. A file the XML parser cannot read is refused by both, in the parser's own words, so that wording differs. The test needs Node and `@xmldom/xmldom` and skips without them.
+The page gives the same answers as the Python tool. `tests/test_web.py` runs both on a set of CSV and XML cases and compares them: converted XML byte for byte, rule, warning and convert messages word for word. A file the XML parser cannot read is refused by both, in the parser's own words, so that wording differs. The test needs Node and `@xmldom/xmldom` and skips without them.
 
 To use it from a copy of this repo, open `docs/index.html` in a browser. No server needed.
+
+## Start from your payroll export
+
+`docs/map.html` is a second page, for the file your payroll system already exports: https://flyingmiata-droid.github.io/payroll-xml/map.html
+
+Drop the export as a CSV, with whatever column names it has. The page guesses which column is which and you correct it. You type what a payroll export does not carry: the vendor ID, contract ID, payroll number and pay week, and your state's craft code and labor class for each of your classifications. Then it converts, runs the same rule check, and gives you the XML. Save the setup as a file. Next week, load it with the new export and convert.
+
+It reads days down the page or across it, straight time and overtime in their own columns or on their own rows, hours as 7.75 or 7:45, names in one column or two, and pay totals in the same file or in a second one. It leaves out rows for other jobs and for leave pay and tells you how many, and rows for other weeks when each row carries a date. It runs in the browser tab like the first page and sends nothing anywhere. A saved setup leaves out SSNs unless you tick the box that keeps them.
+
+This page is browser only. The Python tool does not have it yet. It has been tested on made-up exports built from the column layouts payroll systems publish (`samples/exports`, `tests/mapper_cases.js`). It has not been run on a real export. If yours does not match up, open an issue with the row of column names, and leave out names and SSNs.
 
 ## CSV layout
 
@@ -44,17 +79,23 @@ Totals columns (same on every row for one employee and labor class): `gross_pay,
 
 `other_deductions` is `description:amount` pairs separated by `;`. Leave it empty when there are none.
 
+Optional columns (leave them out, or blank, when they do not apply; same on every row for one employee and labor class): `project_gross` is the pay for this contract and project only, `lump_sum` is cash fringe or other cash paid on the line, and `apprentice_id` and `apprentice_pct` are needed when `apprentice` is yes.
+
 Rows where every cell is blank are skipped. Spreadsheet exports often end with a few rows of bare commas.
 
 Excel habits it handles: dates saved as 10/4/2026 are read as 2026-10-04, a plain "CSV" save (Windows-1252) is read as well as "CSV UTF-8", and float leftovers like -1.1E-13 come out as 0.00. A file that mixes two text encodings is refused, so accented names never come out garbled. Excel can also turn a project number that looks like a date into a date; format that column as Text before you save.
 
-`gender` takes Male or Female (M and F are mapped). Code values for `ethnicity`, `fringe_type`, `craft_code` and `labor_class` come from your state's own list. The tool passes them through. It does not invent them. The sample uses Wisconsin's codes (craft 100 Laborers, labor class 101 Laborer Group 1, ethnicity HISP and A-IN) as they appear on the WisDOT spreadsheet template v3.
+`gender` takes Male or Female (M and F are mapped). `fringe_type` takes Cash, Plan Funds, or Plan Funds with Exceptions, in any case. Code values for `ethnicity`, `craft_code` and `labor_class` come from your state's own list. The tool passes them through. It does not invent them. The sample uses Wisconsin's codes (craft 100 Laborers, labor class 101 Laborer Group 1, ethnicity HISP and A-IN) as they appear on the WisDOT spreadsheet template v3.
+
+## What it does not check
+
+Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert does not write fringe benefit programs or fringe rates yet, so a Plan Funds payroll needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.
 
 ## Where this fits
 
 Today's road on a state highway job: your payroll system, then hand entry into the state's Excel template (Wisconsin's is one form per employee, fifty blocks), then the web converter, then the import, then the error log. This tool replaces the middle. Export a flat CSV from payroll, convert, check, upload.
 
-States that import this format through their AASHTOWare Project Civil Rights and Labor module include Wisconsin, Ohio, Alaska, Louisiana, Oklahoma, Connecticut and West Virginia (each state publishes its own contractor payroll page and its own code lists). If your state is not listed and imports Payroll XML, open an issue with a link to its page.
+States that import this format through their AASHTOWare Project Civil Rights and Labor module include Wisconsin, Ohio, Alaska, Louisiana, Oklahoma, Connecticut, West Virginia, Tennessee, Montana, Minnesota, Kansas and Oregon (each state publishes its own contractor payroll page and its own code lists). If your state is not listed and imports Payroll XML, open an issue with a link to its page.
 
 ## Schema
 

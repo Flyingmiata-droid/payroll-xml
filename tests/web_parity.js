@@ -1,5 +1,5 @@
 // Runs the browser code (docs/prlxml.js) under Node on every case file in a folder
-// and prints one JSON object: {name: {xml} | {error} | {errors}}.
+// and prints one JSON object: {name: {xml} | {error} | {errors, warnings}}.
 // tests/test_web.py compares that with the Python tool. Needs @xmldom/xmldom on NODE_PATH.
 "use strict";
 const fs = require("fs");
@@ -23,10 +23,10 @@ for (const name of fs.readdirSync(dir).sort()) {
     try {
       text = prlxml.decodeXmlBytes(bytes);
     } catch (e) {
-      out[name] = { errors: ["not well-formed XML: " + e.message] };
+      out[name] = { errors: ["not well-formed XML: " + e.message], warnings: [] };
       continue;
     }
-    out[name] = { errors: prlxml.checkXml(text, DOMParser) };
+    out[name] = prlxml.scanXml(text, DOMParser);
   }
 }
 process.stdout.write(JSON.stringify(out));

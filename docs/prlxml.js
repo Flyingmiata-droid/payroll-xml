@@ -22,6 +22,10 @@
   var DAY_COLS = ["work_date", "st_hours", "ot_hours"];
   var TOTAL_COLS = ["gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"];
   var REQUIRED = [].concat(HEADER_COLS, EMP_COLS, LABOR_COLS, DAY_COLS, TOTAL_COLS);
+  // Optional columns. Leave them out or blank when they do not apply.
+  // project_gross: pay for this contract and project only. Blank means rates times hours plus lump_sum.
+  // lump_sum: cash fringe or other cash paid on this line. apprentice_id, apprentice_pct: needed when apprentice is yes.
+  var OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"];
 
   function ConvertError(message) {
     this.name = "ConvertError";
@@ -81,6 +85,8 @@
     var exp = m[5] ? parseInt(m[5], 10) : 0;
     var mant = BigInt((intPart + frac) || "0");
     var scale = frac.length - exp;
+    // Same limits as the Python tool: at most 100 digits, exponent within 100.
+    if (String(mant).length > 100 || scale > 100 || scale < -100) return null;
     if (scale < 0) {
       mant = mant * (10n ** BigInt(-scale));
       scale = 0;
@@ -119,6 +125,27 @@
     var r = mag % div;
     if (2n * r > div || (2n * r === div && q % 2n === 1n)) q += 1n;
     return neg ? -q : q;
+  }
+
+  // Round to k places, half to even. Returns the integer count of 10^-k units.
+  function toScale(d, k) {
+    if (d.s <= k) return d.m * (10n ** BigInt(k - d.s));
+    var div = 10n ** BigInt(d.s - k);
+    var neg = d.m < 0n;
+    var mag = neg ? -d.m : d.m;
+    var q = mag / div;
+    var r = mag % div;
+    if (2n * r > div || (2n * r === div && q % 2n === 1n)) q += 1n;
+    return neg ? -q : q;
+  }
+
+  function fmtScaled(n, k) {
+    var neg = n < 0n;
+    var mag = neg ? -n : n;
+    var unit = 10n ** BigInt(k);
+    var frac = String(mag % unit);
+    while (frac.length < k) frac = "0" + frac;
+    return (neg ? "-" : "") + String(mag / unit) + "." + frac;
   }
 
   function fmtCents(c) {
@@ -203,8 +230,8 @@
 
   var DATE_COLS = ["period_begin", "period_end", "work_date"];
   var SAME_FOR_EMPLOYEE = ["middle_initial", "gender", "ethnicity"];
-  var SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"];
-  var NUMBER_COLS = ["st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare"];
+  var SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"].concat(OPTIONAL);
+  var NUMBER_COLS = ["st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct"];
   var US_DATE = /^([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{4})$/;
 
   // Excel saves 2026-10-04 back out as 10/4/2026. Read both.
@@ -287,9 +314,13 @@
         }
       }
       if (blank) continue; // spreadsheet exports often end with rows of bare commas
-      for (var c = 0; c < REQUIRED.length; c++) {
-        if (BAD_XML_CHARS.test(obj[REQUIRED[c]])) {
-          throw new ConvertError("row " + (k + 1) + ": " + REQUIRED[c] + " holds a control character XML cannot carry: " + pyRepr(obj[REQUIRED[c]]));
+      OPTIONAL.forEach(function (col) {
+        if (!Object.prototype.hasOwnProperty.call(obj, col)) obj[col] = "";
+      });
+      var cols = REQUIRED.concat(OPTIONAL);
+      for (var c = 0; c < cols.length; c++) {
+        if (BAD_XML_CHARS.test(obj[cols[c]])) {
+          throw new ConvertError("row " + (k + 1) + ": " + cols[c] + " holds a control character XML cannot carry: " + pyRepr(obj[cols[c]]));
         }
       }
       DATE_COLS.forEach(function (col) { obj[col] = isoDate(obj[col]); });
@@ -298,6 +329,19 @@
     }
     if (!rows.length) throw new ConvertError("CSV has no data rows");
     return rows;
+  }
+
+  // The field definitions allow 3 decimals on the straight time rate and 4 on the overtime rate. Rates keep what was typed, up to that.
+  var RATE_PLACES = { st_rate: 3, ot_rate: 4 };
+
+  // Returns {m, s}: the rate rounded to at least 2 and at most 3 or 4 places.
+  function rate(value, field, rowNo) {
+    var v = (value || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    if (v === "") return { m: 0n, s: 2 };
+    var d = parseDecimal(v);
+    if (d === null) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value));
+    var k = Math.min(Math.max(d.s, 2), RATE_PLACES[field]);
+    return { m: toScale(d, k), s: k };
   }
 
   function dec(value, field, rowNo) {
@@ -317,6 +361,13 @@
   function genderText(value) {
     var v = (value || "").trim();
     var map = { m: "Male", male: "Male", f: "Female", female: "Female" };
+    return Object.prototype.hasOwnProperty.call(map, v.toLowerCase()) ? map[v.toLowerCase()] : v;
+  }
+
+  // The field definitions allow Cash, Plan Funds, or Plan Funds with Exceptions. Case is fixed; anything else passes through for the checker to flag.
+  function fringeText(value) {
+    var v = (value || "").trim();
+    var map = { "cash": "Cash", "plan funds": "Plan Funds", "plan funds with exceptions": "Plan Funds with Exceptions" };
     return Object.prototype.hasOwnProperty.call(map, v.toLowerCase()) ? map[v.toLowerCase()] : v;
   }
 
@@ -355,10 +406,11 @@
     }
   }
 
-  function currency(parent, tag, cents) {
+  // amount is cents (BigInt) or {m, s} for a rate with more places.
+  function currency(parent, tag, amount) {
     var wrap = parent.add(tag);
     var cur = wrap.add("txl:Currency");
-    cur.add("txl:amount", fmtCents(cents));
+    cur.add("txl:amount", typeof amount === "bigint" ? fmtCents(amount) : fmtScaled(amount.m, amount.s));
     return wrap;
   }
 
@@ -391,7 +443,7 @@
     root.add("payrollNumber", String(BigInt(pn)));
     root.add("payrollBeginDate", first.period_begin.trim());
     root.add("payrollEndDate", first.period_end.trim());
-    root.add("fringeBenefitPaymentType", first.fringe_type.trim());
+    root.add("fringeBenefitPaymentType", fringeText(first.fringe_type));
 
     // group: employee -> labor class -> day rows, in first-seen order
     var employees = new Map();
@@ -407,6 +459,7 @@
 
     // The XML holds these once per employee or labor line, taken from the first row. A different value on a later row would be lost, so stop.
     function same(col, r, n) {
+      if (Object.prototype.hasOwnProperty.call(RATE_PLACES, col)) return String(toScale(rate(r[col], col, n), 4));
       if (NUMBER_COLS.indexOf(col) >= 0) return String(dec(r[col], col, n));
       if (col === "gender") return genderText(r[col]);
       if (col === "apprentice") return boolText(r[col]);
@@ -458,9 +511,17 @@
         lab.add("laborClass", l0.labor_class.trim());
         lab.add("projectID", l0.project_id.trim());
         lab.add("ojtProgramIndicator", "false");
-        currency(lab, "straightTimeHourlyRate", dec(l0.st_rate, "st_rate", n0));
-        currency(lab, "overtimeHourlyRate", dec(l0.ot_rate, "ot_rate", n0));
+        var stRate = rate(l0.st_rate, "st_rate", n0);
+        var otRate = rate(l0.ot_rate, "ot_rate", n0);
+        currency(lab, "straightTimeHourlyRate", stRate);
+        currency(lab, "overtimeHourlyRate", otRate);
+        var lump = dec(l0.lump_sum, "lump_sum", n0);
+        if (l0.lump_sum.trim()) currency(lab, "lumpSumPayment", lump);
         lab.add("apprentice", boolText(l0.apprentice));
+        if (boolText(l0.apprentice) === "true") {
+          if (l0.apprentice_id.trim()) lab.add("apprenticeID", l0.apprentice_id.trim());
+          if (l0.apprentice_pct.trim()) lab.add("apprenticeWagePercentage", fmtCents(dec(l0.apprentice_pct, "apprentice_pct", n0)));
+        }
 
         var stTotal = 0n;
         var otTotal = 0n;
@@ -481,6 +542,11 @@
         currency(lab, "grossPay", dec(l0.gross_pay, "gross_pay", n0));
         currency(lab, "totalDeductions", dec(l0.total_deductions, "total_deductions", n0));
         currency(lab, "netPay", dec(l0.net_pay, "net_pay", n0));
+        // Required by the field definitions though the schema marks it optional. The state spreadsheets fill it in too.
+        var project = l0.project_gross.trim()
+          ? dec(l0.project_gross, "project_gross", n0)
+          : toCents(decAdd(decAdd(decMul(stRate, { m: stTotal, s: 2 }), decMul(otRate, { m: otTotal, s: 2 })), { m: lump, s: 2 }));
+        currency(lab, "grossProjectAmountEarned", project);
         currency(lab, "fICAAmount", dec(l0.fica, "fica", n0));
         currency(lab, "federalWithholdingTaxAmount", dec(l0.federal_tax, "federal_tax", n0));
         currency(lab, "stateWithholdingTaxAmount", dec(l0.state_tax, "state_tax", n0));
@@ -531,8 +597,31 @@
   var MAX_LEN = [
     ["vendorID", 20], ["contractID", 20], ["lastName", 40], ["firstName", 40],
     ["vendorSuppliedEmployeeID", 40], ["ethnicity", 20], ["craftCode", 20], ["laborClass", 20], ["projectID", 18],
-    ["PartialSsn", 20], ["benefitProgramName", 80], ["benefitAccountID", 40], ["trusteeContactPerson", 40]
+    ["PartialSsn", 20], ["benefitProgramName", 80], ["benefitAccountID", 40], ["trusteeContactPerson", 40],
+    ["trusteeContactPhoneNumber", 13], ["benefitProgramClass", 20], ["apprenticeID", 20], ["description", 256], ["explanation", 256]
   ];
+  var FRINGE_TYPES = ["Cash", "Plan Funds", "Plan Funds with Exceptions"];
+  var PLAN_FUNDS = ["Plan Funds", "Plan Funds with Exceptions"];
+  var PROGRAM_TYPES = ["Fringe Health/Welfare", "Fringe Vacation/Holiday", "Fringe Apprenticeship Fund", "Fringe Pension", "Fringe Other 1", "Fringe Other 2"];
+  var FRINGE_RATES = ["healthWellfareRate", "vacationHolidayRate", "apprenticeshipFundRate", "pensionRate", "other1Rate", "other2Rate"];
+  var DEDUCTION_PARTS = ["fICAAmount", "federalWithholdingTaxAmount", "stateWithholdingTaxAmount", "medicareAmount"];
+  var ZERO = { m: 0n, s: 0 };
+  var ONE_CENT = { m: 1n, s: 2 };
+  var DAY = { m: 24n, s: 0 };
+
+  function isTrue(s) {
+    var v = s.toLowerCase();
+    return v === "true" || v === "1";
+  }
+
+  function decCmp(a, b) {
+    var x = align(a, b);
+    return x[0] < x[1] ? -1 : x[0] > x[1] ? 1 : 0;
+  }
+
+  function decMul(a, b) {
+    return { m: a.m * b.m, s: a.s + b.s };
+  }
 
   function elementKids(node) {
     var out = [];
@@ -580,9 +669,9 @@
     return e ? (leadText(e) || "").trim() : "";
   }
 
-  function lenErrors(node, who) {
+  function lenErrors(node, who, extra) {
     var out = [];
-    MAX_LEN.forEach(function (pair) {
+    MAX_LEN.concat(extra || []).forEach(function (pair) {
       kidsNamed(node, pair[0]).forEach(function (e) {
         var v = leadText(e) || "";
         var n = cpLen(v);
@@ -592,9 +681,9 @@
     return out;
   }
 
-  // YYYY-MM-DD only, a real calendar day. Returns a day number or null.
+  // xs:date: YYYY-MM-DD, with an optional time zone that the tool ignores. Returns a day number or null.
   function parseDate(s) {
-    var m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/.exec(s);
+    var m = /^([0-9]{4})-([0-9]{2})-([0-9]{2})(?:Z|[+-][0-9]{2}:[0-9]{2})?$/.exec(s);
     if (!m) return null;
     var y = +m[1], mo = +m[2], d = +m[3];
     if (y < 1 || mo < 1 || mo > 12 || d < 1) return null;
@@ -615,22 +704,46 @@
     return null;
   }
 
+  // The amount inside a currency field. null when the field is absent, "" when it holds no amount.
+  function cur(node, tag) {
+    if (!kidNamed(node, tag)) return null;
+    var g = firstGrandchild(node, tag);
+    return g ? (leadText(g) || "").trim() : "";
+  }
+
+  // xmldom also accepts a file whose last closing tag was cut off. Browsers and lxml do not.
+  function rootClosed(text, rootEl) {
+    var tail = text.replace(/\s+$/, "");
+    for (;;) {
+      if (/-->$/.test(tail) && tail.lastIndexOf("<!--") >= 0) tail = tail.slice(0, tail.lastIndexOf("<!--")).replace(/\s+$/, "");
+      else if (/\?>$/.test(tail) && tail.lastIndexOf("<?") > 0) tail = tail.slice(0, tail.lastIndexOf("<?")).replace(/\s+$/, "");
+      else break;
+    }
+    var tag = rootEl.tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp("</" + tag + "\\s*>$").test(tail)) return true;
+    return !rootEl.firstChild && /\/>$/.test(tail);
+  }
+
   function parseXml(text, DOMParserImpl) {
     var fatal = null;
     var doc;
     if (DOMParserImpl) {
+      // xmldom (used under Node) only warns about an element left open at the end of the file.
+      // Browsers and lxml refuse that file, so treat it as fatal here too.
+      var unclosed = function (m) { if (/unclosed/.test(String(m))) fatal = fatal || m; };
       var handler = {
-        warning: function () {},
+        warning: unclosed,
         error: function (m) { fatal = fatal || m; },
         fatalError: function (m) { fatal = fatal || m; }
       };
-      doc = new DOMParserImpl({ errorHandler: handler, onError: function (level, m) { if (level !== "warning") fatal = fatal || m; } })
+      doc = new DOMParserImpl({ errorHandler: handler, onError: function (level, m) { if (level !== "warning") fatal = fatal || m; else unclosed(m); } })
         .parseFromString(text, "text/xml");
     } else {
       doc = new DOMParser().parseFromString(text, "application/xml");
     }
     if (fatal) throw new Error(String(fatal).split("\n")[0]);
     if (!doc || !doc.documentElement) throw new Error("no root element");
+    if (DOMParserImpl && !rootClosed(text, doc.documentElement)) throw new Error("the root element " + doc.documentElement.tagName + " is never closed");
     var perr = doc.getElementsByTagName("parsererror");
     if (perr.length || doc.documentElement.localName === "parsererror") {
       var msg = (perr.length ? perr[0].textContent : doc.documentElement.textContent) || "parse error";
@@ -640,21 +753,24 @@
     return doc;
   }
 
-  // Returns a list of plain-English rule errors. Empty list means the rules are clean.
-  function checkXml(text, DOMParserImpl) {
+  // Returns {errors, warnings}, two lists of plain-English lines.
+  // An error is something the field definitions require or an import rejects.
+  // A warning is something a state reviewer would question; the file may still import.
+  function scanXml(text, DOMParserImpl) {
     var doc;
     try {
       doc = parseXml(text, DOMParserImpl);
     } catch (e) {
-      return ["not well-formed XML: " + e.message];
+      return { errors: ["not well-formed XML: " + e.message], warnings: [] };
     }
     var root = doc.documentElement;
     var errs = [];
-    if (root.localName !== "Payroll") return ["root element is not Payroll"];
+    var warns = [];
+    if (root.localName !== "Payroll") return { errors: ["root element is not Payroll"], warnings: [] };
     if (root.namespaceURI !== PRL_NS) {
-      return ["Payroll XML 1.2 needs the namespace " + PRL_NS + ", this file has " + (root.namespaceURI || "(none)")];
+      return { errors: ["Payroll XML 1.2 needs the namespace " + PRL_NS + ", this file has " + (root.namespaceURI || "(none)")], warnings: [] };
     }
-    errs = errs.concat(lenErrors(root, ""));
+    errs = errs.concat(lenErrors(root, "", [["comments", 256]]));
 
     var b = t(root, "payrollBeginDate");
     var e = t(root, "payrollEndDate");
@@ -664,7 +780,7 @@
       errs.push("bad period date: begin " + pyRepr(b) + ", end " + pyRepr(e));
       begin = end = null;
     } else if (end - begin !== 6) {
-      errs.push("pay period must be seven days: " + b + " to " + e + " is " + (end - begin + 1) + " days");
+      errs.push("pay period must be seven days: " + b.slice(0, 10) + " to " + e.slice(0, 10) + " is " + (end - begin + 1) + " days");
     }
 
     var pn = t(root, "payrollNumber");
@@ -674,76 +790,290 @@
     var cid = t(root, "contractID");
     if (cid.indexOf(" ") >= 0 || cid.indexOf("-") >= 0) errs.push("contractID must have no dashes or spaces");
 
+    var ft = t(root, "fringeBenefitPaymentType");
+    if (FRINGE_TYPES.indexOf(ft) < 0) {
+      errs.push("fringeBenefitPaymentType must be Cash, Plan Funds, or Plan Funds with Exceptions, got " + pyRepr(ft));
+    }
+
+    var names = {};
+    descNamed(root, "PayrollBenefitProgram").forEach(function (prog, idx) {
+      var who = "benefit program " + (idx + 1) + ": ";
+      errs = errs.concat(lenErrors(prog, who));
+      ["benefitProgramName", "benefitAccountID", "trusteeContactPerson", "trusteeContactPhoneNumber"].forEach(function (tag) {
+        if (!t(prog, tag)) errs.push(who + tag + " is required");
+      });
+      var ptype = t(prog, "benefitProgramType");
+      if (PROGRAM_TYPES.indexOf(ptype) < 0) {
+        errs.push(who + "benefitProgramType must be one of " + PROGRAM_TYPES.join(", ") + ", got " + pyRepr(ptype));
+      } else if ((ptype === "Fringe Other 1" || ptype === "Fringe Other 2") && !t(prog, "benefitProgramClass")) {
+        errs.push(who + "benefitProgramClass is required for " + ptype);
+      }
+      var name = t(prog, "benefitProgramName");
+      if (name && Object.prototype.hasOwnProperty.call(names, name)) {
+        errs.push(who + "benefitProgramName " + pyRepr(name) + " is used twice; each program needs its own name");
+      }
+      names[name] = true;
+    });
+
+    if (ft === "Plan Funds with Exceptions" && !descNamed(root, "PayrollEmployeeFringeBenefitException").length) {
+      warns.push("fringe type is Plan Funds with Exceptions, but no employee has a fringe benefit exception");
+    }
+
+    var seenPeople = new Map();
     descNamed(root, "PayrollEmployee").forEach(function (emp) {
       var who = t(emp, "lastName") + ", " + t(emp, "firstName");
-      errs = errs.concat(lenErrors(emp, who + ": "));
+      seenPeople.set(who, (seenPeople.get(who) || 0) + 1);
+      errs = errs.concat(lenErrors(emp, who + ": ", [["comments", 3999]]));
       var g = t(emp, "gender");
       if (g && g !== "Male" && g !== "Female") errs.push(who + ": gender must be the word Male or Female, got " + pyRepr(g));
       if (!kidNamed(emp, "changeIndicator")) errs.push(who + ": changeIndicator is missing; the importing system requires true or false");
       var mi = t(emp, "middleInitial");
       if (cpLen(mi) > 1) errs.push(who + ": middleInitial must be one character, got " + pyRepr(mi));
       var ssn = t(emp, "socialSecurityNumber");
-      if (ssn && (!/^[0-9]+$/.test(ssn) || ssn.length !== 9)) errs.push(who + ": socialSecurityNumber must be 9 digits, no dashes or spaces");
+      if (ssn && !/^[0-9]{9}$/.test(ssn)) errs.push(who + ": socialSecurityNumber must be 9 digits, no dashes or spaces");
+      if (!(ssn || t(emp, "PartialSsn") || t(emp, "vendorSuppliedEmployeeID"))) {
+        errs.push(who + ": no employee ID; give socialSecurityNumber, PartialSsn or vendorSuppliedEmployeeID, whichever your state asks for");
+      }
+      var salaried = isTrue(t(emp, "salariedEmployeeIndicator"));
 
+      var empTotal = ZERO;
+      var empBad = false;
+      var empDays = new Map();
       descNamed(emp, "PayrollEmployeeLabor").forEach(function (lab) {
         var cls = t(lab, "laborClass");
-        errs = errs.concat(lenErrors(lab, who + " " + cls + ": "));
-        var stSum = { m: 0n, s: 0 };
-        var otSum = { m: 0n, s: 0 };
+        var pre = who + " " + cls + ": ";
+        errs = errs.concat(lenErrors(lab, pre));
+
+        var rates = {};
+        var rateCount = 0;
+        var otZero = null; // an overtime rate of 0 is judged after the hours are counted
+        if (salaried) {
+          if (cur(lab, "straightTimeHourlyRate") !== null || cur(lab, "overtimeHourlyRate") !== null) {
+            errs.push(pre + "a salaried employee has no straightTimeHourlyRate or overtimeHourlyRate; take them out");
+          }
+        } else {
+          ["straightTimeHourlyRate", "overtimeHourlyRate"].forEach(function (tag) {
+            var v = cur(lab, tag);
+            var n = v ? parseDecimal(v) : null;
+            if (!v) errs.push(pre + tag + " is required for an hourly employee");
+            else if (n === null) errs.push(pre + tag + " " + pyRepr(v) + " is not a number");
+            else if (n.m < 0n || (n.m === 0n && tag === "straightTimeHourlyRate")) errs.push(pre + tag + " must be more than 0, got " + v);
+            else {
+              rates[tag] = n;
+              rateCount++;
+              if (n.m === 0n) otZero = v;
+            }
+          });
+        }
+
+        var hasFringeRate = false;
+        FRINGE_RATES.forEach(function (tag) {
+          var v = cur(lab, tag);
+          if (v === null) return;
+          var n = parseDecimal(v);
+          if (n === null) errs.push(pre + tag + " " + pyRepr(v) + " is not a number");
+          else if (n.m <= 0n) errs.push(pre + tag + " must be more than 0 when it is in the file, got " + v);
+          else hasFringeRate = true;
+        });
+
+        if (isTrue(t(lab, "ojtProgramIndicator")) && !t(lab, "ojtWagePercentage")) {
+          errs.push(pre + "ojtWagePercentage is required when ojtProgramIndicator is true");
+        }
+        if (isTrue(t(lab, "apprentice"))) {
+          ["apprenticeID", "apprenticeWagePercentage"].forEach(function (tag) {
+            if (!t(lab, tag)) errs.push(pre + tag + " is required when apprentice is true");
+          });
+        }
+
+        var stSum = ZERO;
+        var otSum = ZERO;
+        var salSum = ZERO;
+        var daysOk = true;
+        var seenDays = {};
         descNamed(lab, "PayrollEmployeeLaborHour").forEach(function (h) {
           var ds = t(h, "laborHourDate");
           var d = parseDate(ds);
           if (d === null) {
-            errs.push(who + " " + cls + ": bad laborHourDate " + pyRepr(ds));
+            errs.push(pre + "bad laborHourDate " + pyRepr(ds));
+            daysOk = false;
             return;
           }
-          if (begin !== null && !(begin <= d && d <= end)) errs.push(who + " " + cls + ": hours on " + ds + " fall outside the pay period");
+          ds = ds.slice(0, 10);
+          if (begin !== null && !(begin <= d && d <= end)) errs.push(pre + "hours on " + ds + " fall outside the pay period");
+          if (Object.prototype.hasOwnProperty.call(seenDays, ds)) warns.push(pre + ds + " is listed twice; merge it into one day");
+          seenDays[ds] = true;
           var hh = kidNamed(h, "hourlyHours");
+          var sh = kidNamed(h, "salariedEmployeeHours");
+          var day;
+          var at = who + " " + cls + " " + ds + ": ";
           if (hh) {
+            if (salaried) errs.push(at + "a salaried employee reports salariedEmployeeHours, not straight and overtime hours");
             var st = t(hh, "straightTimeHours");
             var ot = t(hh, "overtimeHours");
-            if (st === "" || ot === "") errs.push(who + " " + cls + " " + ds + ": straight and overtime hours must both be filled, use 0.00");
+            var otTag = !!kidNamed(hh, "overtimeHours");
+            if (st === "" || (otTag && ot === "")) errs.push(at + "straight and overtime hours must both be filled, use 0.00");
+            else if (!otTag) warns.push(at + "overtimeHours is left out; Wisconsin's import wants 0.00 on a day with no overtime");
             var stN = parseDecimal(st || "0");
             var otN = parseDecimal(ot || "0");
             if (stN === null || otN === null) {
-              errs.push(who + " " + cls + " " + ds + ": hours must be numbers, got " + pyRepr(st) + " and " + pyRepr(ot));
+              errs.push(at + "hours must be numbers, got " + pyRepr(st) + " and " + pyRepr(ot));
+              daysOk = false;
               return;
             }
+            if (stN.m < 0n || otN.m < 0n) errs.push(at + "hours cannot be below 0");
             stSum = decAdd(stSum, stN);
             otSum = decAdd(otSum, otN);
+            day = decAdd(stN, otN);
+          } else if (sh) {
+            if (!salaried) errs.push(at + "salariedEmployeeHours is only for a salaried employee; use straightTimeHours and overtimeHours");
+            var s = (leadText(sh) || "").trim();
+            var sN = parseDecimal(s);
+            if (sN === null) {
+              errs.push(at + "salariedEmployeeHours must be a number, got " + pyRepr(s));
+              daysOk = false;
+              return;
+            }
+            if (sN.m < 0n) errs.push(at + "hours cannot be below 0");
+            salSum = decAdd(salSum, sN);
+            day = sN;
+          } else {
+            return;
           }
+          empDays.set(ds, decAdd(empDays.has(ds) ? empDays.get(ds) : ZERO, day));
         });
-        [["straightTimeHours", stSum], ["overtimeHours", otSum]].forEach(function (pair) {
+        if (!daysOk) empBad = true;
+        var labSum = decAdd(decAdd(stSum, otSum), salSum);
+        empTotal = decAdd(empTotal, labSum);
+        if (otZero !== null) {
+          if (decCmp(otSum, ZERO) > 0) errs.push(pre + "overtimeHourlyRate must be more than 0 when there is overtime, got " + otZero);
+          else warns.push(pre + "overtimeHourlyRate is " + otZero + "; some states want a rate above 0 even with no overtime");
+        }
+
+        // A salaried line reports salariedEmployeeHours by day, so its straight and overtime totals are not compared.
+        (salaried ? [] : [["straightTimeHours", stSum], ["overtimeHours", otSum]]).forEach(function (pair) {
           var tot = t(lab, pair[0]);
-          if (tot) {
+          if (pair[0] === "straightTimeHours" && !tot) {
+            errs.push(pre + "straightTimeHours is required, use 0.00 when there were none");
+          } else if (tot) {
             var tv = parseDecimal(tot);
-            if (tv === null) errs.push(who + " " + cls + ": " + pair[0] + " total " + pyRepr(tot) + " is not a number");
-            else if (!decEq(tv, pair[1])) errs.push(who + " " + cls + ": " + pair[0] + " total " + tot + " does not match the daily sum " + fmt2(pair[1]));
+            if (tv === null) errs.push(pre + pair[0] + " total " + pyRepr(tot) + " is not a number");
+            else if (!decEq(tv, pair[1])) errs.push(pre + pair[0] + " total " + tot + " does not match the daily sum " + fmt2(pair[1]));
           }
         });
         var allTot = t(lab, "totalHours");
-        if (allTot) {
+        if (!allTot) {
+          errs.push(pre + "totalHours is required");
+        } else {
           var av = parseDecimal(allTot);
-          var daySum = decAdd(stSum, otSum);
-          if (av === null) errs.push(who + " " + cls + ": totalHours " + pyRepr(allTot) + " is not a number");
-          else if (!decEq(av, daySum)) errs.push(who + " " + cls + ": totalHours " + allTot + " does not match the daily sum " + fmt2(daySum));
+          if (av === null) errs.push(pre + "totalHours " + pyRepr(allTot) + " is not a number");
+          else if (!decEq(av, labSum)) errs.push(pre + "totalHours " + allTot + " does not match the daily sum " + fmt2(labSum));
         }
+
+        ["grossPay", "totalDeductions", "netPay"].forEach(function (tag) {
+          if (!cur(lab, tag)) errs.push(pre + tag + " is required");
+        });
         var gross = firstGrandchild(lab, "grossPay");
         var ded = firstGrandchild(lab, "totalDeductions");
         var net = firstGrandchild(lab, "netPay");
+        var gv = null;
+        var dv = null;
         if (gross && ded && net) {
-          var gv = parseDecimal(leadText(gross));
-          var dv = parseDecimal(leadText(ded));
+          gv = parseDecimal(leadText(gross));
+          dv = parseDecimal(leadText(ded));
           var nv = parseDecimal(leadText(net));
           if (gv === null || dv === null || nv === null) {
-            errs.push(who + " " + cls + ": grossPay, totalDeductions and netPay must be numbers");
+            errs.push(pre + "grossPay, totalDeductions and netPay must be numbers");
           } else if (!decEq(decSub(gv, dv), nv)) {
-            errs.push(who + " " + cls + ": grossPay minus totalDeductions is not netPay (" + leadText(gross) + " - " + leadText(ded) + " != " + leadText(net) + ")");
+            errs.push(pre + "grossPay minus totalDeductions is not netPay (" + leadText(gross) + " - " + leadText(ded) + " != " + leadText(net) + ")");
+          }
+        }
+        var pv = null;
+        var gpe = cur(lab, "grossProjectAmountEarned");
+        if (!gpe) errs.push(pre + "grossProjectAmountEarned is required, the pay for this contract and project only");
+        else if (parseDecimal(gpe) === null) errs.push(pre + "grossProjectAmountEarned " + pyRepr(gpe) + " is not a number");
+        else pv = parseDecimal(gpe);
+
+        var parts = ZERO;
+        var taxSeen = false;
+        var partsOk = true;
+        DEDUCTION_PARTS.forEach(function (tag) {
+          var v = cur(lab, tag);
+          if (v === null) return;
+          taxSeen = true;
+          var n = parseDecimal(v || "0");
+          if (n === null) {
+            errs.push(pre + tag + " " + pyRepr(v) + " is not a number");
+            partsOk = false;
+          } else parts = decAdd(parts, n);
+        });
+        var descs = {};
+        descNamed(lab, "PayrollEmployeeOtherDeduction").forEach(function (od) {
+          errs = errs.concat(lenErrors(od, pre));
+          var desc = t(od, "description");
+          if (Object.prototype.hasOwnProperty.call(descs, desc)) {
+            errs.push(pre + "other deduction " + pyRepr(desc) + " is listed twice; each description must be unique");
+          }
+          descs[desc] = true;
+          var v = cur(od, "amount");
+          if (v === null) return;
+          var n = parseDecimal(v || "0");
+          if (n === null) {
+            errs.push(pre + "other deduction " + pyRepr(desc) + " amount " + pyRepr(v) + " is not a number");
+            partsOk = false;
+          } else parts = decAdd(parts, n);
+        });
+        descNamed(lab, "PayrollEmployeeFringeBenefitException").forEach(function (ex) {
+          errs = errs.concat(lenErrors(ex, pre));
+        });
+
+        // The four tax fields are optional. With none of them in the file the parts cannot be added up.
+        if (taxSeen && partsOk && dv !== null && !decEq(parts, dv)) {
+          warns.push(pre + "FICA, federal, state, Medicare and other deductions add up to " + fmt2(parts) + ", but totalDeductions is " +
+            (leadText(ded) || "").trim() + "; totalDeductions should include all taxes and other deductions");
+        }
+
+        var under = false;
+        if (!salaried && daysOk && rateCount === 2 && rates.straightTimeHourlyRate.m > 0n) {
+          var calcC = toCents(decAdd(decMul(rates.straightTimeHourlyRate, stSum), decMul(rates.overtimeHourlyRate, otSum)));
+          var calc = { m: calcC, s: 2 };
+          if (pv !== null && decCmp(decSub(calc, pv), ONE_CENT) > 0) {
+            warns.push(pre + "grossProjectAmountEarned " + gpe + " is less than the hours times the rates (" + fmtCents(calcC) + "); that reads as underpayment");
+            under = true;
+          } else if (gv !== null && decCmp(decSub(calc, gv), ONE_CENT) > 0) {
+            warns.push(pre + "grossPay " + (leadText(gross) || "").trim() + " is less than the hours times the rates (" + fmtCents(calcC) + "); that reads as underpayment");
+            under = true;
+          }
+        }
+        if (!under && gv !== null && pv !== null && decCmp(gv, pv) < 0) {
+          warns.push(pre + "grossPay " + (leadText(gross) || "").trim() + " is less than grossProjectAmountEarned " + gpe + "; gross pay should be the project pay plus any other pay");
+        }
+        if (rateCount === 2 && decCmp(otSum, ZERO) > 0 && rates.overtimeHourlyRate.m > 0n && decCmp(rates.overtimeHourlyRate, rates.straightTimeHourlyRate) < 0) {
+          warns.push(pre + "overtime rate " + cur(lab, "overtimeHourlyRate") + " is lower than the straight rate " + cur(lab, "straightTimeHourlyRate"));
+        }
+        if (PLAN_FUNDS.indexOf(ft) >= 0 && !hasFringeRate) {
+          if (ft === "Plan Funds" || !descNamed(lab, "PayrollEmployeeFringeBenefitException").length) {
+            warns.push(pre + "fringe type is " + ft + " but this line has no fringe rate; fill at least one fringe rate and fringeBenefits");
           }
         }
       });
+
+      if (!empBad && decCmp(empTotal, ZERO) === 0) {
+        warns.push(who + ": no hours on this payroll; a state that sets Include Employees with Zero Hours to False rejects the file");
+      }
+      empDays.forEach(function (hours, ds) {
+        if (decCmp(hours, DAY) > 0) warns.push(who + ": " + ds + " adds up to " + fmt2(hours) + " hours, more than a day holds");
+      });
     });
-    return errs;
+
+    seenPeople.forEach(function (n, who) {
+      if (n > 1) warns.push(who + ": listed as " + n + " separate employees; if this is one person, put all of their labor lines under one employee");
+    });
+    return { errors: errs, warnings: warns };
+  }
+
+  // Rule errors only, the same list check.py's rule_errors gives.
+  function checkXml(text, DOMParserImpl) {
+    return scanXml(text, DOMParserImpl).errors;
   }
 
   var SAMPLE_CSV = [
@@ -753,11 +1083,11 @@
     "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Garcia,Luis,A,1234,E01,Male,HISP,100,101,9999-01-01,N,28.50,42.75,2026-10-07,8.00,1.00,1239.75,281.21,958.54,76.86,148.00,0.00,17.98,Union dues:38.37",
     "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Garcia,Luis,A,1234,E01,Male,HISP,100,101,9999-01-01,N,28.50,42.75,2026-10-08,8.00,0.00,1239.75,281.21,958.54,76.86,148.00,0.00,17.98,Union dues:38.37",
     "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Garcia,Luis,A,1234,E01,Male,HISP,100,101,9999-01-01,N,28.50,42.75,2026-10-09,8.00,0.00,1239.75,281.21,958.54,76.86,148.00,0.00,17.98,Union dues:38.37",
-    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-05,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,",
-    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-06,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,",
-    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-07,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,",
-    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-08,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,",
-    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-09,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,",
+    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-05,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,Union dues:48.09",
+    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-06,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,Union dues:48.09",
+    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-07,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,Union dues:48.09",
+    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-08,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,Union dues:48.09",
+    "V1001,20260001,1,2026-10-04,2026-10-10,Cash,Nguyen,Tran,,5678,E02,Female,A-IN,200,201,9999-01-01,N,34.10,51.15,2026-10-09,8.00,0.00,1364.00,312.44,1051.56,84.57,160.00,0.00,19.78,Union dues:48.09",
     ""
   ].join("\n");
 
@@ -771,7 +1101,9 @@
     decodeXmlBytes: decodeXmlBytes,
     convertCsv: convertCsv,
     checkXml: checkXml,
+    scanXml: scanXml,
+    OPTIONAL: OPTIONAL,
     SAMPLE_CSV: SAMPLE_CSV,
-    TEMPLATE_CSV: REQUIRED.join(",") + "\n"
+    TEMPLATE_CSV: REQUIRED.concat(OPTIONAL).join(",") + "\n"
   };
 });

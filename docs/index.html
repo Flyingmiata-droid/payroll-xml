@@ -23,6 +23,8 @@
     --rule: #9fada5;
     --stop: #b42318;
     --stop-wash: #fbeceb;
+    --warn: #8a5a00;
+    --warn-wash: #fdf3dc;
     --go-wash: #e7f2ec;
     --focus: #e3a600;
     --code: #eef1ef;
@@ -39,6 +41,8 @@
       --rule: #4f7463;
       --stop: #ff8a80;
       --stop-wash: #3a1a17;
+      --warn: #ffc533;
+      --warn-wash: #3a2e0c;
       --go-wash: #0f4029;
       --focus: #ffc533;
       --code: #04201a;
@@ -55,6 +59,8 @@
     --rule: #4f7463;
     --stop: #ff8a80;
     --stop-wash: #3a1a17;
+    --warn: #ffc533;
+    --warn-wash: #3a2e0c;
     --go-wash: #0f4029;
     --focus: #ffc533;
     --code: #04201a;
@@ -164,6 +170,8 @@
     border-radius: 0 4px 4px 0;
     overflow-wrap: anywhere;
   }
+  ul.problems.warnings li { background: var(--warn-wash); border-left-color: var(--warn); }
+  .warn-label { margin: 0 0 6px; font-weight: 700; }
   .not-checked { margin: 14px 0 0; font-size: 0.95rem; color: var(--muted); }
   details { margin-top: 14px; }
   summary { cursor: pointer; font-weight: 700; }
@@ -212,6 +220,7 @@
   </header>
 
   <p class="stays">Your file stays on this computer. <span>The page runs in your browser and uploads nothing, SSNs included.</span></p>
+  <p>Starting from a payroll export with its own column names? <a href="map.html">Match your columns on this page</a> and skip the layout below.</p>
 
   <fieldset class="box">
     <legend>Your file</legend>
@@ -231,6 +240,8 @@
     <p class="verdict" id="verdict"></p>
     <p class="facts" id="facts"></p>
     <ul class="problems" id="problems"></ul>
+    <p class="warn-label" id="warn-label" hidden>Worth a look before you upload</p>
+    <ul class="problems warnings" id="warnings" hidden></ul>
     <div class="actions left" id="download-row" hidden>
       <button type="button" class="primary" id="download">Download the XML</button>
     </div>
@@ -256,7 +267,7 @@
         <tr><td><code>contract_id</code></td><td>The contract number, no dashes or spaces. Same on every row.</td></tr>
         <tr><td><code>payroll_number</code></td><td>This week's payroll number, a whole number starting at 1. Same on every row.</td></tr>
         <tr><td><code>period_begin</code>, <code>period_end</code></td><td>First and last day of the pay week, as 2026-10-04 or 10/4/2026. Seven days. Same on every row.</td></tr>
-        <tr><td><code>fringe_type</code></td><td>Fringe benefit payment type from your state's list. The sample uses Cash.</td></tr>
+        <tr><td><code>fringe_type</code></td><td>Cash, Plan Funds, or Plan Funds with Exceptions. Same on every row.</td></tr>
         <tr><td><code>last_name</code>, <code>first_name</code></td><td>The worker's name.</td></tr>
         <tr><td><code>middle_initial</code></td><td>One letter, or blank.</td></tr>
         <tr><td><code>ssn</code></td><td>All 9 digits, or the last 4. Dashes are taken out for you.</td></tr>
@@ -265,38 +276,59 @@
         <tr><td><code>ethnicity</code></td><td>The code from your state's list.</td></tr>
         <tr><td><code>craft_code</code>, <code>labor_class</code></td><td>Codes from your state's list.</td></tr>
         <tr><td><code>project_id</code></td><td>The project number on the contract.</td></tr>
-        <tr><td><code>apprentice</code></td><td>Y or N.</td></tr>
-        <tr><td><code>st_rate</code>, <code>ot_rate</code></td><td>Straight time and overtime hourly rates.</td></tr>
+        <tr><td><code>apprentice</code></td><td>Y or N. For Y, fill <code>apprentice_id</code> and <code>apprentice_pct</code> too.</td></tr>
+        <tr><td><code>st_rate</code>, <code>ot_rate</code></td><td>Straight time and overtime hourly rates. Up to 3 decimals for straight time and 4 for overtime are kept.</td></tr>
         <tr><td><code>work_date</code></td><td>The day worked, as 2026-10-05 or 10/5/2026.</td></tr>
         <tr><td><code>st_hours</code>, <code>ot_hours</code></td><td>Hours that day. A blank counts as 0.</td></tr>
         <tr><td><code>gross_pay</code>, <code>total_deductions</code>, <code>net_pay</code>, <code>fica</code>, <code>federal_tax</code>, <code>state_tax</code>, <code>medicare</code></td><td>The week's totals for this worker and labor class. Repeat them on each of that worker's day rows. If they differ between rows, the tool stops and names the row.</td></tr>
         <tr><td><code>other_deductions</code></td><td>Pairs like <code>Union dues:38.37</code>, split by semicolons. Blank if none.</td></tr>
+        <tr><td><code>project_gross</code></td><td>Optional. Pay for this contract and project only. Leave it out and the tool uses the rates times the hours, plus <code>lump_sum</code>.</td></tr>
+        <tr><td><code>lump_sum</code></td><td>Optional. Cash fringe or other cash paid on this line.</td></tr>
+        <tr><td><code>apprentice_id</code>, <code>apprentice_pct</code></td><td>Needed when <code>apprentice</code> is Y: the apprentice ID and the wage percentage, like 60.</td></tr>
       </tbody>
     </table>
   </div>
   <p>The sample uses Wisconsin's codes as they appear on the WisDOT spreadsheet template. Your state's codes may differ. This tool passes codes through as you typed them. It cannot tell you if a code is wrong.</p>
 
   <h2>What the check looks for</h2>
-  <p>Each rule is something a state import rejects, taken from state import pages and the official field definitions.</p>
+  <p>Problems are things the official AASHTO field definitions require or a state import rejects. Fix them before you upload.</p>
   <ul class="rules">
     <li>The pay period is seven days, and every day worked falls inside it.</li>
     <li>The payroll number is a whole number starting at 1.</li>
     <li>The contract ID has no dashes or spaces.</li>
-    <li>Every day has straight time and overtime filled in, 0.00 when there were none.</li>
+    <li>Every day has straight time filled in, 0.00 when there was none. An overtime field that is there holds a number.</li>
     <li>Daily hours add up to the straight time, overtime and total hours for the week.</li>
     <li>Gross pay minus deductions equals net pay.</li>
     <li>Gender, when filled in, is the word Male or Female.</li>
     <li>A full SSN is 9 digits with no dashes. A middle initial is one character.</li>
     <li>Every employee has a change indicator.</li>
     <li>No field runs past its length limit.</li>
+    <li>The fringe type is Cash, Plan Funds, or Plan Funds with Exceptions.</li>
+    <li>An hourly worker has a straight time rate above 0 and an overtime rate, above 0 when there is overtime. A salaried worker has neither.</li>
+    <li>Every labor line has its total hours, straight time hours, gross pay, deductions, net pay, and the gross pay for this project.</li>
+    <li>An apprentice line has the apprentice ID and wage percentage. An OJT line has its wage percentage.</li>
+    <li>Every worker has an ID: the full SSN, the last 4, or your own employee ID, whichever your state asks for.</li>
+    <li>No hours below 0. Any fringe rate in the file is above 0.</li>
+    <li>Each other deduction on a line has its own description. Each fringe benefit program has a valid type and all of its fields.</li>
+  </ul>
+  <p>Warnings are things a state reviewer would ask about. Some states also reject them, depending on how they set up their system.</p>
+  <ul class="rules">
+    <li>Pay below the hours times the rates.</li>
+    <li>Taxes and other deductions that do not add up to the total deductions.</li>
+    <li>The same day twice on one labor line, or more than 24 hours in one day.</li>
+    <li>An overtime rate of 0.00, or one lower than the straight time rate.</li>
+    <li>A day with no overtime field. Wisconsin wants 0.00 there.</li>
+    <li>A worker with no hours, or one name listed as two workers.</li>
+    <li>Plan Funds with no fringe rates.</li>
   </ul>
 
   <h2>What it does not check</h2>
+  <p>Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert does not write fringe benefit programs or fringe rates yet, so a Plan Funds payroll needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.</p>
   <p>The full Payroll XML schema. That check needs AASHTO's schema files, which this page does not carry. Run your file through the <a href="https://xml.aashtowareproject.org/resourcekit/validator.html" rel="noopener noreferrer" target="_blank">official online validator</a> before you upload, or use the <a href="https://github.com/Flyingmiata-droid/payroll-xml" rel="noopener noreferrer" target="_blank">Python version</a> of this tool, which checks the schema and the rules together.</p>
 
   <footer>
     <p>payroll-xml is free and open source under the MIT license. Code, issues and the Python version are on <a href="https://github.com/Flyingmiata-droid/payroll-xml" rel="noopener noreferrer" target="_blank">GitHub</a>. Made by Nick Kaufman.</p>
-    <p>Prototype. The sample file passed the official AASHTOWare Project validator on 2026-10-10. It has not been through a state import yet. If you run a file from this page through one, open an issue and say how it went.</p>
+    <p>Prototype. An earlier sample file passed the official AASHTOWare Project validator on 2026-10-10. The current sample adds the project gross field and passes the published schema. Neither has been through a state import yet. If you run a file from this page through one, open an issue and say how it went.</p>
   </footer>
 </main>
 <script src="prlxml.js"></script>

@@ -55,6 +55,15 @@
       list.appendChild(li);
     });
     list.hidden = !(opts.problems && opts.problems.length);
+    var warn = $("warnings");
+    warn.textContent = "";
+    (opts.warnings || []).forEach(function (w) {
+      var li = document.createElement("li");
+      li.textContent = w;
+      warn.appendChild(li);
+    });
+    warn.hidden = !(opts.warnings && opts.warnings.length);
+    $("warn-label").hidden = warn.hidden;
     $("download-row").hidden = !opts.xml;
     $("preview-wrap").hidden = !opts.xml;
     $("preview-wrap").open = false;
@@ -93,32 +102,41 @@
       });
       return;
     }
-    var errs = prlxml.checkXml(xml);
+    var res = prlxml.scanXml(xml);
+    var errs = res.errors;
+    var warns = res.warnings;
     show({
       name: name,
       ok: errs.length === 0,
-      verdict: errs.length === 0
-        ? "Converted. The rules check clean."
-        : "Converted, with " + plural(errs.length, "problem", "problems") + " to fix before you upload.",
+      verdict: errs.length > 0
+        ? "Converted, with " + plural(errs.length, "problem", "problems") + " to fix before you upload."
+        : warns.length > 0 ? "Converted. No problems, " + plural(warns.length, "warning", "warnings") + " to look at."
+        : "Converted. The rules check clean.",
       facts: summary(xml),
       problems: errs,
+      warnings: warns,
       xml: xml,
       outName: baseName(name) + ".xml"
     });
   }
 
   function handleXml(text, name) {
-    var errs = prlxml.checkXml(text);
+    var res = prlxml.scanXml(text);
+    var errs = res.errors;
+    var warns = res.warnings;
     var unreadable = errs.length === 1 && /^not well-formed XML/.test(errs[0]);
     var wellFormed = !(errs.length === 1 && /^not well-formed XML|^root element|^Payroll XML 1\.2 needs/.test(errs[0]));
     show({
       name: name,
       ok: errs.length === 0,
       verdict: unreadable ? "This file cannot be read as XML."
-        : errs.length === 0 ? "The rules check clean." : plural(errs.length, "problem", "problems") + " to fix before you upload.",
+        : errs.length > 0 ? plural(errs.length, "problem", "problems") + " to fix before you upload."
+        : warns.length > 0 ? "No problems, " + plural(warns.length, "warning", "warnings") + " to look at."
+        : "The rules check clean.",
       hideSchemaNote: unreadable,
       facts: wellFormed ? summary(text) : "",
-      problems: errs
+      problems: errs,
+      warnings: warns
     });
   }
 
