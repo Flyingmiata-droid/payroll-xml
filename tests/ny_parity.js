@@ -1,6 +1,6 @@
 // Runs docs/nydol.js under Node on every case file in a folder and prints one JSON object:
 // {name: {xml} | {error} | {errors, warnings}}. tests/test_nydol.py compares that with the
-// Python tool. Needs @xmldom/xmldom 0.8 on NODE_PATH.
+// Python tool. Needs @xmldom/xmldom (0.8 or 0.9) on NODE_PATH.
 "use strict";
 const fs = require("fs");
 const path = require("path");

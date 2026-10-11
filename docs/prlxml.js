@@ -736,8 +736,14 @@
         error: function (m) { fatal = fatal || m; },
         fatalError: function (m) { fatal = fatal || m; }
       };
-      doc = new DOMParserImpl({ errorHandler: handler, onError: function (level, m) { if (level !== "warning") fatal = fatal || m; else unclosed(m); } })
-        .parseFromString(text, "text/xml");
+      var onError = function (level, m) { if (level !== "warning") fatal = fatal || m; else unclosed(m); };
+      var parser;
+      try {
+        parser = new DOMParserImpl({ errorHandler: handler }); // xmldom 0.8
+      } catch (e) {
+        parser = new DOMParserImpl({ onError: onError }); // xmldom 0.9 refuses errorHandler
+      }
+      doc = parser.parseFromString(text, "text/xml");
     } else {
       doc = new DOMParser().parseFromString(text, "application/xml");
     }

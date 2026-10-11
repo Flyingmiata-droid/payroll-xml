@@ -538,13 +538,19 @@
     return { errors: errors, warnings: warnings };
   }
 
-  // text: the XML as a string. Parser: the DOMParser class (window.DOMParser, or @xmldom/xmldom 0.8 under Node).
+  // text: the XML as a string. Parser: the DOMParser class (window.DOMParser, or @xmldom/xmldom 0.8 or 0.9 under Node).
   function checkXml(text, Parser) {
     var problems = [];
     var note = function (m) { problems.push(String(m)); };
     var doc;
     try {
-      doc = new Parser({ errorHandler: { warning: function () {}, error: note, fatalError: note } }).parseFromString(text, "application/xml");
+      var parser;
+      try {
+        parser = new Parser({ errorHandler: { warning: function () {}, error: note, fatalError: note } }); // xmldom 0.8
+      } catch (e) {
+        parser = new Parser({ onError: function (level, m) { if (level !== "warning") note(m); } }); // xmldom 0.9 refuses errorHandler
+      }
+      doc = parser.parseFromString(text, "application/xml");
     } catch (e) {
       return { errors: ["not well-formed XML: " + e.message], warnings: [] };
     }
