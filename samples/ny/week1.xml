@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ProjectRollup xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="NYDOL_CertPayroll.xsd">
+    <prcNumber>2025001234</prcNumber>
+    <weekEndingDate>2026-10-04T00:00:00.000Z</weekEndingDate>
+    <employeeWorkWeeks>
+        <employeeWorkWeek>
+            <employee>
+                <firstName>Maria</firstName>
+                <middleName>A</middleName>
+                <lastName>Lopez</lastName>
+                <ssnLast4>4821</ssnLast4>
+                <nysRegisteredApprentice>false</nysRegisteredApprentice>
+                <address>
+                    <address1>41 Elm St</address1>
+                    <city>Albany</city>
+                    <state>New York</state>
+                    <postalCode>12207</postalCode>
+                    <postalCodeExt>0002</postalCodeExt>
+                    <country>United States</country>
+                </address>
+            </employee>
+            <deductionsGrossEarnings>1935.00</deductionsGrossEarnings>
+            <netWages>1491.97</netWages>
+            <workWeeks>
+                <workWeek>
+                    <workCategory>Laborer - Building</workCategory>
+                    <stHourlyRate>45.00</stHourlyRate>
+                    <otHourlyRate>67.50</otHourlyRate>
+                    <days>
+                        <day>
+                            <day>2026-09-28</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-09-29</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-09-30</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-10-01</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-10-02</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>2.00</overTimeHours>
+                        </day>
+                    </days>
+                </workWeek>
+            </workWeeks>
+            <deductions>
+                <deduction>
+                    <type>Federal Tax</type>
+                    <amount>210.00</amount>
+                </deduction>
+                <deduction>
+                    <type>State Tax</type>
+                    <amount>85.00</amount>
+                </deduction>
+                <deduction>
+                    <type>FICA</type>
+                    <amount>119.97</amount>
+                </deduction>
+                <deduction>
+                    <type>Medicare</type>
+                    <amount>28.06</amount>
+                </deduction>
+            </deductions>
+            <supplementalPayments>
+                <supplementalPayment>
+                    <type>Health/Welfare</type>
+                    <workCategory>Laborer - Building</workCategory>
+                    <standardHourlyRate>12.50</standardHourlyRate>
+                    <overtimeHourlyRate>12.50</overtimeHourlyRate>
+                </supplementalPayment>
+                <supplementalPayment>
+                    <type>Apprenticeship/Training</type>
+                    <workCategory>Laborer - Building</workCategory>
+                    <standardHourlyRate>0.80</standardHourlyRate>
+                    <overtimeHourlyRate>0.80</overtimeHourlyRate>
+                </supplementalPayment>
+                <supplementalPayment>
+                    <type>Pension</type>
+                    <workCategory>Laborer - Building</workCategory>
+                    <standardHourlyRate>9.75</standardHourlyRate>
+                    <overtimeHourlyRate>9.75</overtimeHourlyRate>
+                </supplementalPayment>
+            </supplementalPayments>
+        </employeeWorkWeek>
+        <employeeWorkWeek>
+            <employee>
+                <firstName>James</firstName>
+                <lastName>O'Neill</lastName>
+                <dateOfBirth>1999-04-17</dateOfBirth>
+                <nysRegisteredApprentice>true</nysRegisteredApprentice>
+                <address>
+                    <address1>9 River Rd</address1>
+                    <address2>Apt 2</address2>
+                    <city>Fort Lee</city>
+                    <state>New Jersey</state>
+                    <postalCode>07024</postalCode>
+                    <country>United States</country>
+                </address>
+            </employee>
+            <deductionsGrossEarnings>1612.00</deductionsGrossEarnings>
+            <netWages>1278.69</netWages>
+            <workWeeks>
+                <workWeek>
+                    <workCategory>Carpenter - Building</workCategory>
+                    <stHourlyRate>38.00</stHourlyRate>
+                    <otHourlyRate>57.00</otHourlyRate>
+                    <days>
+                        <day>
+                            <day>2026-09-28</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-09-29</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-09-30</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                    </days>
+                </workWeek>
+                <workWeek>
+                    <workCategory>Carpenter - Heavy and Highway</workCategory>
+                    <stHourlyRate>40.00</stHourlyRate>
+                    <otHourlyRate>60.00</otHourlyRate>
+                    <days>
+                        <day>
+                            <day>2026-10-01</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>1.00</overTimeHours>
+                        </day>
+                        <day>
+                            <day>2026-10-02</day>
+                            <standardTimeHours>8.00</standardTimeHours>
+                            <overTimeHours>0.00</overTimeHours>
+                        </day>
+                    </days>
+                </workWeek>
+            </workWeeks>
+            <deductions>
+                <deduction>
+                    <type>Federal Tax</type>
+                    <amount>150.00</amount>
+                </deduction>
+                <deduction>
+                    <type>State Tax</type>
+                    <amount>60.00</amount>
+                </deduction>
+                <deduction>
+                    <type>FICA</type>
+                    <amount>99.94</amount>
+                </deduction>
+                <deduction>
+                    <type>Medicare</type>
+                    <amount>23.37</amount>
+                </deduction>
+            </deductions>
+            <supplementalPayments>
+                <supplementalPayment>
+                    <type>Health/Welfare</type>
+                    <workCategory>Carpenter - Building</workCategory>
+                    <standardHourlyRate>11.00</standardHourlyRate>
+                    <overtimeHourlyRate>11.00</overtimeHourlyRate>
+                </supplementalPayment>
+                <supplementalPayment>
+                    <type>Other Benefit (Type)</type>
+                    <workCategory>Carpenter - Building</workCategory>
+                    <explanation>Annuity</explanation>
+                    <standardHourlyRate>1.50</standardHourlyRate>
+                    <overtimeHourlyRate>1.50</overtimeHourlyRate>
+                </supplementalPayment>
+                <supplementalPayment>
+                    <type>Health/Welfare</type>
+                    <workCategory>Carpenter - Heavy and Highway</workCategory>
+                    <standardHourlyRate>11.00</standardHourlyRate>
+                    <overtimeHourlyRate>11.00</overtimeHourlyRate>
+                </supplementalPayment>
+            </supplementalPayments>
+        </employeeWorkWeek>
+    </employeeWorkWeeks>
+</ProjectRollup>

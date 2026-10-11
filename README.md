@@ -63,6 +63,22 @@ It reads days down the page or across it, straight time and overtime in their ow
 
 This page is browser only. The Python tool does not have it yet. It has been tested on made-up exports built from the column layouts payroll systems publish (`samples/exports`, `tests/mapper_cases.js`). It has not been run on a real export. If yours does not match up, open an issue with the row of column names, and leave out names and SSNs.
 
+## New York State DOL
+
+New York has required contractors on public work to upload weekly certified payroll to the NYS DOL Certified Payroll System since 2025-12-31. The bulk upload is its own XML format (`NYDOL_CertPayroll.xsd`), one file per project (PRC number) per week. It is not Payroll XML 1.2.
+
+    python -m prlxml.fetch_schemas ny
+    python -m prlxml.nydol convert samples/ny/week1.csv -o week1.xml
+    python -m prlxml.nydol check week1.xml
+
+In the browser: https://flyingmiata-droid.github.io/payroll-xml/ny.html (`docs/ny.html`). It has the same converter and rules as the Python tool, without the schema check. Nothing leaves the tab. `tests/test_nydol.py` holds the page and the Python tool to the same answers.
+
+The CSV is one row per worker, per classification, per day. Columns: `prc_number, week_ending, last_name, first_name, middle_name, ssn_last4, date_of_birth, apprentice, address1, address2, city, state, zip, country, gross_earnings, net_wages, deductions, work_category, st_rate, ot_rate, work_date, st_hours, ot_hours`, plus optional hourly supplement rates `health, vacation, training, pension, other` (with `other_explanation`, and `_ot` columns when the overtime rate differs). See `samples/ny/week1.csv`. Give `ssn_last4` or `date_of_birth`, not both; a full SSN is cut to its last 4. Two letter states are spelled out, and a ZIP that Excel cut to 4 digits gets its leading 0 back.
+
+The check runs the state schema, then rules for what the upload rejects that the schema lets through: SSN last 4 and date of birth both or neither, the same worker twice, a day outside the week, an abbreviated state, an Other Benefit supplement with no explanation (or an explanation on another type), negative hours, rates or pay, and a straight time rate of 0.00. It also names four places where the state's guide page and its schema disagree: the field is `deductionsGrossEarnings` with an s, the address needs a country, apprentice is true or false (not Y or N), and the week ending date carries a time. Warnings: gross minus deductions not equal to net, gross below the hours times the rates, a day twice, more than 24 hours in a day, overtime rate below straight time, a supplement for a classification the worker is not listed under, and a worker with no hours.
+
+Status: `samples/ny/week1.xml`, written by this tool, passes the state's published schema as posted in October 2026. No file from this tool has been through the state's upload yet.
+
 ## CSV layout
 
 One row per employee, per labor class, per day worked. Header row required. See `samples/week1.csv`.

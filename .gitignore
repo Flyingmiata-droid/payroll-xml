@@ -3,4 +3,5 @@ __pycache__/
 schemas/
 *.xml
 !samples/*.xml
+!samples/ny/*.xml
 .pytest_cache/
