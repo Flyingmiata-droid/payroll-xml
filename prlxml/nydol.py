@@ -1,7 +1,7 @@
 """New York State DOL certified payroll: convert a CSV to the state's bulk upload XML, and check a file.
 
-Since 2025-12-31 New York requires contractors on public work to upload weekly certified
-payroll to the NYS DOL Certified Payroll System. The bulk upload is one XML file per
+Since January 1, 2026 New York requires contractors on public work to submit certified
+payroll through the NYS DOL Certified Payroll System, at least every 30 days. The bulk upload is one XML file per
 project (PRC number) per week, in the state's own format (NYDOL_CertPayroll.xsd). It is
 not Payroll XML 1.2.
 
