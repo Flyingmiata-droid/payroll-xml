@@ -59,6 +59,7 @@ eq(JSON.stringify(prlmap.CANON), JSON.stringify(prlxml.REQUIRED.concat(prlxml.OP
 // The samples the page offers are the files in samples/exports.
 eq(samples.HOURS_CSV, read("hours by pay type.csv"), "page sample hours file");
 eq(samples.TOTALS_CSV, read("pay totals.csv"), "page sample totals file");
+eq(samples.NY_CSV, read("ny week.csv"), "page sample New York file");
 
 // ---- cells ----
 eq(prlmap.parseDate("2026-10-05"), "2026-10-05");
@@ -439,6 +440,142 @@ eq(prlmap.guessPayType("Holiday"), null);
   ok(!/,2026-10-10,[0-9.]+,1\.00,/.test(res.csv), "the overtime row under the shop job is left out with it");
 })();
 
+// ---- New York State DOL: the same mapper, the New York file ----
+// The made-up export in samples/exports/ny week.csv must come out byte for byte as samples/ny/week1.xml,
+// the file docs/nydol.js and the Python tool write from samples/ny/week1.csv.
+(function () {
+  const nydol = require(path.join(root, "docs", "nydol.js"));
+  const NY_XML = fs.readFileSync(path.join(root, "samples", "ny", "week1.xml"), "utf8");
+  nydol.REQUIRED.forEach(function (col) { ok(prlmap.NY_COLS.indexOf(col) >= 0, "NY_COLS has " + col); });
+
+  const t = prlmap.readTable(read("ny week.csv"), 0);
+  const s = prlmap.guess(t);
+  eq(s.cols.full_name, "Employee");
+  eq(s.cols.ssn, "SSN");
+  eq(s.cols.date_of_birth, "Birth Date");
+  eq(s.cols.address1, "Address");
+  eq(s.cols.address2, "Address 2");
+  eq(s.cols.city, "City");
+  eq(s.cols.home_state, "State");
+  eq(s.cols.zip, "Zip");
+  eq(s.cols.st_rate, "Reg Rate");
+  eq(s.cols.ot_rate, "OT Rate");
+  eq(s.cols.net_pay, "Net Pay");
+  eq(s.cols.apprentice, "Apprentice");
+  ok(!s.cols.state_tax || s.cols.state_tax === "State Withholding", "State is not taken for state tax");
+  eq(s.target, "aashto");
+
+  s.target = "ny";
+  s.payroll.period_begin = "2026-09-28";
+  const NY_CLASSES = {
+    "Laborer": { work_category: "Laborer - Building", health: "12.50", pension: "9.75", training: "0.80" },
+    "Carpenter": { work_category: "Carpenter - Building", health: "11.00", other: "1.50", other_explanation: "Annuity" },
+    "Carpenter H&H": { work_category: "Carpenter - Heavy and Highway", health: "11.00" }
+  };
+
+  // what is missing is said in plain words, all at once
+  let p = problemsOf(function () { prlmap.buildNy(t, null, s); });
+  ok(has(p, /Fill in the PRC number/), String(p));
+  ok(!has(p, /work category for "Laborer"/), "a classification with no typed category uses its own name");
+
+  s.payroll.prc_number = "2025001234";
+  s.classes = NY_CLASSES;
+  const info = prlmap.inspect(t, s);
+  eq(info.target, "ny");
+  eq(info.classes.join("|"), "Laborer|Carpenter|Carpenter H&H");
+  eq(info.people[1].shown.date_of_birth, "4/17/1999");
+  eq(info.people[1].shown.home_state, "NJ");
+
+  const res = prlmap.buildNy(t, null, s);
+  eq(res.employees, 2);
+  eq(res.lines, 3);
+  eq(res.days, 10);
+  const xml = nydol.convertCsv(res.csv);
+  eq(xml, NY_XML, "ny week.csv through the mapper matches samples/ny/week1.xml");
+  if (DOMParser) {
+    scans++;
+    const chk = nydol.checkXml(xml, DOMParser);
+    eq(chk.errors.length, 0, String(chk.errors));
+  }
+  // the New York sample the page offers: the page's guess plus what fillNy types
+  const pageSample = samples.fillNy(prlmap.guess(prlmap.readTable(samples.NY_CSV, 0)));
+  eq(nydol.convertCsv(prlmap.buildNy(prlmap.readTable(samples.NY_CSV, 0), null, pageSample).csv), NY_XML, "page New York sample");
+  // the setup survives a save and a load
+  const again = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  eq(again.target, "ny");
+  eq(again.payroll.prc_number, "2025001234");
+  eq(nydol.convertCsv(prlmap.buildNy(t, null, again).csv), NY_XML);
+
+  // a PRC number of the wrong length
+  const shortPrc = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  shortPrc.payroll.prc_number = "12345";
+  ok(has(problemsOf(function () { prlmap.buildNy(t, null, shortPrc); }), /PRC number should be 10 characters/));
+
+  // no address and no SSN or birth date for a worker
+  const bare = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  delete bare.cols.address1;
+  delete bare.cols.city;
+  delete bare.cols.date_of_birth;
+  p = problemsOf(function () { prlmap.buildNy(t, null, bare); });
+  ok(has(p, /Lopez, Maria: New York wants the worker's home address\. Missing: street address, city\./), String(p));
+  ok(has(p, /O'Neill, James: New York wants the last 4 of the SSN or the date of birth/), String(p));
+  // typed in the workers table, they win
+  bare.people[info.people[0].key] = { address1: "41 Elm St", city: "Albany" };
+  bare.people[info.people[1].key] = { address1: "9 River Rd", city: "Fort Lee", date_of_birth: "1999-04-17" };
+  eq(nydol.convertCsv(prlmap.buildNy(t, null, bare).csv), NY_XML, "typed address and birth date");
+
+  // both an SSN and a birth date: the file carries the last 4
+  const two = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  two.people[info.people[1].key] = { ssn: "123-45-6789" };
+  const r2 = prlmap.buildNy(t, null, two);
+  ok(has(r2.notes, /1 worker has both an SSN and a date of birth/), String(r2.notes));
+  ok(/<ssnLast4>6789<\/ssnLast4>/.test(nydol.convertCsv(r2.csv)));
+  ok(!/<dateOfBirth>/.test(nydol.convertCsv(r2.csv)));
+
+  // fringes and rates New York cannot take
+  const bad = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  bad.classes.Laborer.health = "12.505";
+  bad.classes.Carpenter.other_explanation = "";
+  p = problemsOf(function () { prlmap.buildNy(t, null, bad); });
+  ok(has(p, /The health fringe for "Laborer" should be an amount per hour/), String(p));
+  ok(has(p, /The other fringe for "Carpenter" needs a name/), String(p));
+  const odd = prlmap.readTable(read("ny week.csv").replace(/,45\.00,67\.50,/g, ",45.125,67.50,"), 0);
+  ok(has(problemsOf(function () { prlmap.buildNy(odd, null, s); }), /straight time rate 45\.125 has more than 2 decimal places/));
+
+  // no overtime rate column: a problem, unless straight times 1.5 is chosen
+  const noOt = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  delete noOt.cols.ot_rate;
+  ok(has(problemsOf(function () { prlmap.buildNy(t, null, noOt); }), /no overtime rate\. New York wants one/));
+  noOt.otRule = "x1.5";
+  eq(nydol.convertCsv(prlmap.buildNy(t, null, noOt).csv), NY_XML, "straight times 1.5 gives the same overtime rates");
+
+  // net pay worked out, and only a total for deductions
+  const calc = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  delete calc.cols.net_pay;
+  ok(has(problemsOf(function () { prlmap.buildNy(t, null, calc); }), /no net pay found/));
+  calc.netRule = "calc";
+  calc.deductionsRule = "sum";
+  eq(nydol.convertCsv(prlmap.buildNy(t, null, calc).csv), NY_XML, "net worked out from gross and the deductions");
+
+  // two classification lines with different gross: one amount per worker, or add them up when ticked
+  const split = prlmap.readTable(read("ny week.csv").replace(/(Carpenter H&H,8\.00,[01]\.00,40\.00,60\.00,)"1,612\.00"/g, '$1"800.00"'), 0);
+  ok(has(problemsOf(function () { prlmap.buildNy(split, null, s); }), /gross pay differs between classification lines/));
+
+  // the same classification typed to one category twice: days add, rates must match
+  const merged = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  merged.classes["Carpenter H&H"] = { work_category: "Carpenter - Building", health: "11.00", other: "1.50", other_explanation: "Annuity" };
+  ok(has(problemsOf(function () { prlmap.buildNy(t, null, merged); }), /different straight time rates, 38\.00 and 40\.00/));
+
+  // the AASHTO side of the page is untouched by the New York columns
+  const aashto = prlmap.normalizeSetup(JSON.parse(JSON.stringify(s)));
+  aashto.target = "aashto";
+  ok(has(problemsOf(function () { prlmap.build(t, null, aashto); }), /Fill in your vendor ID/));
+  // and the AASHTO sample says what New York still needs
+  const hours = prlmap.readTable(read("hours by pay type.csv"), 0);
+  p = problemsOf(function () { prlmap.buildNy(hours, null, prlmap.guess(hours)); });
+  ok(has(p, /home address/), String(p));
+})();
+
 // ---- reading odd files ----
 (function () {
   const p = problemsOf(function () { prlmap.readTable("", 0); });
@@ -454,7 +591,8 @@ eq(prlmap.guessPayType("Holiday"), null);
   eq(JSON.stringify(s.payTypes), JSON.stringify({ REG: "st" }));
   eq(JSON.stringify(s.cols), JSON.stringify({ hours: "5" }));
   eq(s.payroll.vendor_id, "V1");
-  eq(Object.keys(s.payroll).length, 6);
+  eq(Object.keys(s.payroll).length, 7);
+  eq(s.target, "aashto");
   eq(JSON.stringify(s.people), "{}");
   eq(s.dayCols.st.length, 7);
 })();

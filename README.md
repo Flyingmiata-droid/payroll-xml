@@ -61,6 +61,8 @@ Drop the export as a CSV, with whatever column names it has. The page guesses wh
 
 It reads days down the page or across it, straight time and overtime in their own columns or on their own rows, hours as 7.75 or 7:45, names in one column or two, and pay totals in the same file or in a second one. It leaves out rows for other jobs and for leave pay and tells you how many, and rows for other weeks when each row carries a date. It runs in the browser tab like the first page and sends nothing anywhere. A saved setup leaves out SSNs unless you tick the box that keeps them.
 
+For New York public work, the same page writes the New York State DOL bulk upload file. Pick New York in step 3 and type the PRC number. For each classification, type the work category the way the prevailing rate schedule names it, and the supplement rates per hour. The worker's home address and the last 4 of the SSN or the birth date come from the export when it has them, or you type them in the workers table. Deductions go in by type: federal, state, FICA, Medicare and any other deduction columns you tick. The made-up sample `samples/exports/ny week.csv` comes out byte for byte as `samples/ny/week1.xml`.
+
 This page is browser only. The Python tool does not have it yet. It has been tested on made-up exports built from the column layouts payroll systems publish (`samples/exports`, `tests/mapper_cases.js`). It has not been run on a real export. If yours does not match up, open an issue with the row of column names, and leave out names and SSNs.
 
 ## New York State DOL

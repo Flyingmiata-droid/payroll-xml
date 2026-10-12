@@ -262,7 +262,7 @@
   <header class="sign">
     <div class="sign-face">
       <h1>Payroll XML</h1>
-      <p>Start from the file your payroll system already exports. Match its columns once and get the XML your state DOT imports.</p>
+      <p>Start from the file your payroll system already exports. Match its columns once and get the XML your state DOT imports, or the bulk upload file for the New York State DOL.</p>
     </div>
   </header>
 
@@ -296,6 +296,7 @@
       <button type="button" class="secondary" id="setup-choose">Load a saved setup</button>
       <input type="file" id="setup-file" accept=".json,application/json">
       <button type="button" class="secondary" id="sample">Try the sample export</button>
+      <button type="button" class="secondary" id="sample-ny">Try the New York sample</button>
     </div>
     <p class="got" id="files-note" hidden></p>
   </fieldset>
@@ -350,12 +351,18 @@
   <fieldset class="box" id="payroll" hidden>
     <legend>3. This payroll</legend>
     <p class="hint">These are not in a payroll export. They come from your contract and your state's system.</p>
+    <fieldset class="choice">
+      <legend>The file goes to</legend>
+      <label class="check"><input type="radio" name="target" value="aashto"> <span>a state DOT, as Payroll XML 1.2 (AASHTOWare Project and the systems that take its format)</span></label>
+      <label class="check"><input type="radio" name="target" value="ny"> <span>the New York State DOL Certified Payroll System, as its bulk upload file (NY public work)</span></label>
+    </fieldset>
     <div class="grid">
-      <label class="field"><span>Vendor ID</span><input type="text" id="p-vendor_id" autocomplete="off"><small>Your vendor ID with the state.</small></label>
-      <label class="field"><span>Contract ID</span><input type="text" id="p-contract_id" autocomplete="off"><small>No dashes or spaces.</small></label>
-      <label class="field"><span>Payroll number</span><input type="text" id="p-payroll_number" inputmode="numeric" autocomplete="off"><small>A whole number, 1 for the first week.</small></label>
+      <label class="field ny-only" hidden><span>PRC number</span><input type="text" id="p-prc_number" autocomplete="off"><small>The 10 character number on the prevailing rate schedule for this project.</small></label>
+      <label class="field aashto-only"><span>Vendor ID</span><input type="text" id="p-vendor_id" autocomplete="off"><small>Your vendor ID with the state.</small></label>
+      <label class="field aashto-only"><span>Contract ID</span><input type="text" id="p-contract_id" autocomplete="off"><small>No dashes or spaces.</small></label>
+      <label class="field aashto-only"><span>Payroll number</span><input type="text" id="p-payroll_number" inputmode="numeric" autocomplete="off"><small>A whole number, 1 for the first week.</small></label>
       <label class="field"><span>First day of the pay week</span><input type="date" id="p-period_begin"><small id="period-end">The week is seven days.</small></label>
-      <label class="field"><span>Fringe type</span>
+      <label class="field aashto-only"><span>Fringe type</span>
         <select id="p-fringe_type">
           <option value="">Pick one</option>
           <option>Cash</option>
@@ -372,7 +379,8 @@
     <p class="hint">Fill in what the export does not carry. Anything you type here wins over the file. Your state says which ID it wants: the full SSN, the last 4, or your own ID.</p>
     <div class="table-wrap" id="workers"></div>
     <div id="classes-wrap">
-      <p class="hint">Craft codes and labor classes come from your state's own list. This tool cannot tell you if a code is wrong.</p>
+      <p class="hint aashto-only">Craft codes and labor classes come from your state's own list. This tool cannot tell you if a code is wrong.</p>
+      <p class="hint ny-only" hidden>Type each work category the way the prevailing rate schedule names it, and the supplement (fringe) rates per hour paid to a fund or plan for it. Leave a box blank for 0. This tool cannot tell you if a rate is wrong for the schedule.</p>
       <div class="table-wrap" id="classes"></div>
     </div>
   </fieldset>
@@ -405,7 +413,7 @@
       <summary>Show the XML</summary>
       <pre id="xml-preview"></pre>
     </details>
-    <p class="not-checked" id="not-checked">This page does not check the full schema. Before you upload, run the file through the <a href="https://xml.aashtowareproject.org/resourcekit/validator.html" rel="noopener noreferrer" target="_blank">official online validator</a>.</p>
+    <p class="not-checked" id="not-checked"><span class="aashto-only">This page does not check the full schema. Before you upload, run the file through the <a href="https://xml.aashtowareproject.org/resourcekit/validator.html" rel="noopener noreferrer" target="_blank">official online validator</a>.</span><span class="ny-only" hidden>This page checks New York's rules but not the full schema. To check the schema, run the file through the Python tool in the repo.</span></p>
   </fieldset>
 
   <h2>What this page reads</h2>
@@ -420,7 +428,7 @@
   </ul>
 
   <h2>What it does not do</h2>
-  <p>It does not know your state's codes, so you type the craft code and labor class for each classification once and save the setup. It does not write fringe benefit programs or fringe rates. It handles one contract per file. It does not read Excel workbooks, only CSV.</p>
+  <p>It does not know your state's codes, so you type the craft code and labor class for each classification once and save the setup. For a state DOT file it does not write fringe benefit programs or fringe rates. For New York you type the work category and the supplement rates for each classification once, and the home address and the last 4 of the SSN or the birth date for any worker the export leaves them out for. It handles one contract per file. It does not read Excel workbooks, only CSV.</p>
   <p>It tells workers apart by ID, or by name when the file has no ID. Two workers with the same name need a worker ID column. Check how each name was split in the workers table; a name like Mary Ann Smith can split in the wrong place.</p>
 
   <footer>
@@ -429,6 +437,7 @@
   </footer>
 </main>
 <script src="prlxml.js"></script>
+<script src="nydol.js"></script>
 <script src="mapper.js"></script>
 <script src="map-samples.js"></script>
 <script src="map-app.js"></script>

@@ -25,6 +25,15 @@
   var MONEY_FIELDS = ["gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum"];
   var TAX_FIELDS = ["fica", "federal_tax", "state_tax", "medicare"];
   var PERSON_FIELDS = ["last_name", "first_name", "middle_initial", "ssn", "employee_id", "gender", "ethnicity"];
+  // What the New York State DOL file needs about a worker on top of that.
+  var NY_PERSON_FIELDS = ["date_of_birth", "address1", "address2", "city", "home_state", "zip"];
+  // What New York needs about a classification: its work category name and the fringe rates per hour.
+  var NY_FRINGES = ["health", "vacation", "training", "pension", "other"];
+  // The CSV layout docs/nydol.js reads. tests/mapper_cases.js checks it covers nydol's required columns.
+  var NY_COLS = ["prc_number", "week_ending", "last_name", "first_name", "middle_name", "ssn_last4", "date_of_birth", "apprentice",
+    "address1", "address2", "city", "state", "zip", "country", "gross_earnings", "net_wages", "deductions",
+    "work_category", "st_rate", "ot_rate", "health", "vacation", "training", "pension", "other", "other_explanation",
+    "work_date", "st_hours", "ot_hours"];
 
   function MapError(problems) {
     this.name = "MapError";
@@ -377,7 +386,14 @@
     net_pay: ["netpay", "net", "netwages", "netpaid", "netcheck", "netamount", "takehome"],
     apprentice: ["apprentice", "isapprentice"],
     apprentice_id: ["apprenticeid", "apprenticeojtid"],
-    apprentice_pct: ["apprenticepct", "apprenticepercentage", "apprenticeojtpercentage", "apprenticewagepercentage"]
+    apprentice_pct: ["apprenticepct", "apprenticepercentage", "apprenticeojtpercentage", "apprenticewagepercentage"],
+    // the worker's home address and birth date, which the New York file carries
+    date_of_birth: ["dateofbirth", "dob", "birthdate", "birthday", "employeedob", "employeebirthdate"],
+    address1: ["address", "address1", "addressline1", "street", "streetaddress", "homeaddress", "employeeaddress", "mailingaddress", "addr1"],
+    address2: ["address2", "addressline2", "apt", "aptsuite", "suite", "unit", "addr2"],
+    city: ["city", "town", "employeecity", "homecity"],
+    home_state: ["state", "homestate", "employeestate", "addressstate", "stateprovince", "province"],
+    zip: ["zip", "zipcode", "postalcode", "postal", "zip5", "employeezip", "homezip"]
   };
   // Fields a pay totals file can supply.
   var TOTALS_FILE_FIELDS = ["employee_id", "full_name", "last_name", "first_name", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare"];
@@ -423,6 +439,7 @@
   function emptySetup() {
     return {
       version: 1,
+      target: "aashto",
       days: "down",
       payType: "columns",
       nameOrder: "last_first",
@@ -435,7 +452,7 @@
       netRule: "column",
       rowAmounts: "repeat",
       jobs: [],
-      payroll: { vendor_id: "", contract_id: "", payroll_number: "", period_begin: "", fringe_type: "", project_id: "" },
+      payroll: { vendor_id: "", contract_id: "", payroll_number: "", period_begin: "", fringe_type: "", project_id: "", prc_number: "" },
       totals: { nameOrder: "last_first", cols: {}, otherDeductionCols: [] },
       people: {},
       classes: {}
@@ -470,6 +487,7 @@
   function normalizeSetup(raw) {
     var s = emptySetup();
     if (!raw || typeof raw !== "object") return s;
+    s.target = pick(raw.target, ["aashto", "ny"], "aashto");
     s.days = pick(raw.days, ["down", "across"], "down");
     s.payType = pick(raw.payType, ["columns", "code"], "columns");
     s.nameOrder = pick(raw.nameOrder, ["last_first", "first_last"], "last_first");
@@ -726,7 +744,8 @@
         prev = null;
         return;
       } else {
-        who = { id: id, last: last, first: first, mi: mi.replace(/\./g, ""), ssn: get(row, "ssn"), gender: get(row, "gender"), ethnicity: get(row, "ethnicity") };
+        who = { id: id, last: last, first: first, mi: mi.replace(/\./g, ""), ssn: get(row, "ssn"), gender: get(row, "gender"), ethnicity: get(row, "ethnicity"), extra: {} };
+        NY_PERSON_FIELDS.forEach(function (f) { who.extra[f] = get(row, f); });
         prev = who;
       }
 
@@ -818,7 +837,8 @@
       var key = who.id ? "id:" + who.id : nameKey(who.last, who.first);
       var emp = emps.get(key);
       if (!emp) {
-        emp = { key: key, id: who.id, last: who.last, first: who.first, mi: who.mi, ssn: who.ssn, gender: who.gender, ethnicity: who.ethnicity, row: n, lines: new Map(), lastLine: null };
+        emp = { key: key, id: who.id, last: who.last, first: who.first, mi: who.mi, ssn: who.ssn, gender: who.gender, ethnicity: who.ethnicity, extra: {}, row: n, lines: new Map(), lastLine: null };
+        NY_PERSON_FIELDS.forEach(function (f) { emp.extra[f] = who.extra[f]; });
         emps.set(key, emp);
       } else {
         if (!inherited) {
@@ -832,6 +852,9 @@
         }
         ["last", "first", "mi", "ssn", "gender", "ethnicity"].forEach(function (f) {
           if (!emp[f] && who[f]) emp[f] = who[f];
+        });
+        NY_PERSON_FIELDS.forEach(function (f) {
+          if (!emp.extra[f] && who.extra[f]) emp.extra[f] = who.extra[f];
         });
       }
 
@@ -920,11 +943,17 @@
     return { emps: emps, problems: problems, notes: notes, seen: seen, count: count, minDate: minDate, maxDate: maxDate, begin: begin, end: end };
   }
 
+  function found(emp) {
+    var from = { last_name: emp.last, first_name: emp.first, middle_initial: emp.mi, ssn: emp.ssn, employee_id: emp.id, gender: emp.gender, ethnicity: emp.ethnicity };
+    NY_PERSON_FIELDS.forEach(function (f) { from[f] = emp.extra[f]; });
+    return from;
+  }
+
   function person(emp, setup) {
     var o = own(setup.people, emp.key) ? setup.people[emp.key] : {};
-    var from = { last_name: emp.last, first_name: emp.first, middle_initial: emp.mi, ssn: emp.ssn, employee_id: emp.id, gender: emp.gender, ethnicity: emp.ethnicity };
+    var from = found(emp);
     var out = {};
-    PERSON_FIELDS.forEach(function (f) {
+    PERSON_FIELDS.concat(NY_PERSON_FIELDS).forEach(function (f) {
       out[f] = own(o, f) ? o[f].trim() : from[f]; // what the person typed wins, a typed blank included
     });
     return out;
@@ -944,9 +973,10 @@
           ot += d.ot;
         });
       });
-      people.push({ key: emp.key, found: { last_name: emp.last, first_name: emp.first, middle_initial: emp.mi, ssn: emp.ssn, employee_id: emp.id, gender: emp.gender, ethnicity: emp.ethnicity }, shown: person(emp, setup), lines: emp.lines.size, st: fmtHours(st), ot: fmtHours(ot) });
+      people.push({ key: emp.key, found: found(emp), shown: person(emp, setup), lines: emp.lines.size, st: fmtHours(st), ot: fmtHours(ot) });
     });
-    var directCodes = !!setup.cols.craft_code && !!setup.cols.labor_class && own(table.index, setup.cols.craft_code) && own(table.index, setup.cols.labor_class);
+    // New York has no state codes: every classification gets a work category name and fringe rates.
+    var directCodes = setup.target !== "ny" && !!setup.cols.craft_code && !!setup.cols.labor_class && own(table.index, setup.cols.craft_code) && own(table.index, setup.cols.labor_class);
     var classes = [];
     if (!directCodes) {
       var seenCls = {};
@@ -959,7 +989,7 @@
         });
       });
     }
-    return { people: people, classes: classes, directCodes: directCodes, payTypes: g.seen.payTypes, jobs: g.seen.jobs, minDate: g.minDate, maxDate: g.maxDate, rowsKept: g.count.kept, notes: g.notes };
+    return { target: setup.target, people: people, classes: classes, directCodes: directCodes, payTypes: g.seen.payTypes, jobs: g.seen.jobs, minDate: g.minDate, maxDate: g.maxDate, rowsKept: g.count.kept, notes: g.notes };
   }
 
   function gatherTotals(table, setup, byId, problems) {
@@ -1174,8 +1204,272 @@
     return { csv: out.join("\n") + "\n", notes: notes, employees: g.emps.size, lines: nLines, days: nDays };
   }
 
+  // ---- New York State DOL bulk upload ----
+
+  // Last 4 of an SSN from a full, masked or partial one. "" when blank, null when unreadable.
+  function ssnLast4(v) {
+    var s = cleanSsn(v).replace(/[\s-]/g, "");
+    if (s === "") return "";
+    if (/^[0-9]{4}$/.test(s) || /^[0-9]{9}$/.test(s)) return s.slice(-4);
+    return null;
+  }
+
+  function cents2(v) {
+    return v % 100 === 0; // a rate in ten-thousandths with at most two places
+  }
+
+  // Returns { csv, notes, employees, lines, days } in the layout docs/nydol.js converts.
+  // Throws MapError with every problem found, in plain words.
+  function buildNy(hoursTable, totalsTable, setupIn) {
+    var setup = normalizeSetup(setupIn);
+    setup.target = "ny";
+    var g = gather(hoursTable, setup);
+    var problems = g.problems.slice();
+    var notes = g.notes.slice();
+    var pay = setup.payroll;
+    var c = setup.cols;
+    var hasCol = function (k) { return !!c[k] && own(hoursTable.index, c[k]); };
+    var said = {};
+    var once = function (msg) {
+      if (!own(said, msg)) {
+        said[msg] = true;
+        problems.push(msg);
+      }
+    };
+
+    var prc = pay.prc_number;
+    if (!prc) problems.push("Fill in the PRC number. It is the 10 character number on the prevailing rate schedule for this project.");
+    else if (Array.from(prc).length !== 10) problems.push("The PRC number should be 10 characters, but \"" + prc + "\" has " + Array.from(prc).length + ".");
+    if (!g.begin) problems.push(pay.period_begin ? "Cannot read the first day of the pay week: \"" + pay.period_begin + "\". Use a date like 2026-10-04 or 10/4/2026." : "Fill in the first day of the pay week.");
+
+    var totals = null;
+    var byId = false;
+    var tc = setup.totals.cols;
+    if (totalsTable) {
+      var tHas = function (k) { return !!tc[k] && own(totalsTable.index, tc[k]); };
+      byId = hasCol("employee_id") && tHas("employee_id");
+      if (!byId && !tHas("full_name") && !tHas("last_name")) {
+        problems.push("In the pay totals file, pick the column that holds the worker's name" + (hasCol("employee_id") ? " or ID." : "."));
+      } else {
+        totals = gatherTotals(totalsTable, setup, byId, problems);
+      }
+    }
+    var grossSource = hasCol("gross_pay") || (totalsTable && !!tc.gross_pay && own(totalsTable.index, tc.gross_pay));
+    if (!grossSource) problems.push("No gross pay yet. Pick the gross pay column in this file, or add a second file that has each worker's pay totals for the week.");
+
+    if (g.emps.size === 0 && g.problems.length === 0) {
+      if (g.count.outside && g.minDate) problems.push("No rows fall inside the pay week, " + g.begin + " to " + g.end + ". The dates in the file run from " + g.minDate + " to " + g.maxDate + ".");
+      else problems.push("No rows with a worker and hours were found in this file.");
+    }
+
+    var needCat = {};
+    var unmatched = [];
+    var used = {};
+    var both = 0;
+    var onlyTotal = 0;
+    var out = [NY_COLS.join(",")];
+    var nLines = 0;
+    var nDays = 0;
+    var LABELS = [["federal_tax", "Federal Tax"], ["state_tax", "State Tax"], ["fica", "FICA"], ["medicare", "Medicare"]];
+
+    g.emps.forEach(function (emp) {
+      var p = person(emp, setup);
+      var label = (p.last_name || p.employee_id) + (p.first_name ? ", " + p.first_name : "");
+      if (!p.last_name || !p.first_name) problems.push("The worker on row " + emp.row + " needs a first and a last name. Fix it in the workers table.");
+
+      var gaps = [];
+      [["address1", "street address"], ["city", "city"], ["home_state", "state"], ["zip", "ZIP"]].forEach(function (f) {
+        if (!p[f[0]]) gaps.push(f[1]);
+      });
+      if (gaps.length) problems.push(label + ": New York wants the worker's home address. Missing: " + gaps.join(", ") + ". Pick the address columns in step 2 or type it in the workers table.");
+
+      var last4 = ssnLast4(p.ssn);
+      if (last4 === null) problems.push(label + ": the SSN box should hold the last 4 digits, or a full or masked SSN, but has \"" + p.ssn + "\".");
+      var dob = "";
+      if (p.date_of_birth) {
+        dob = parseDate(p.date_of_birth);
+        if (!dob) problems.push(label + ": cannot read the date of birth \"" + p.date_of_birth + "\". Use a date like 1990-04-17 or 4/17/1990.");
+      }
+      if (last4 && dob) {
+        both++;
+        dob = ""; // the state takes one or the other, not both
+      }
+      if (last4 === "" && !p.date_of_birth) problems.push(label + ": New York wants the last 4 of the SSN or the date of birth. Fill in one of them in the workers table.");
+
+      var t = null;
+      if (totals) {
+        var keys = byId ? ["id:" + emp.id] : [nameKey(emp.last, emp.first), nameKey(p.last_name, p.first_name)];
+        for (var k = 0; k < keys.length && !t; k++) {
+          if (totals.has(keys[k])) {
+            t = totals.get(keys[k]);
+            used[keys[k]] = true;
+          }
+        }
+        if (!t) unmatched.push(label);
+      }
+
+      // The week's pay for the worker. New York carries one gross, one net and one deduction list per worker.
+      var lines = Array.from(emp.lines.values());
+      var weekly = function (values, total, what) {
+        if (!values.length) return total;
+        var allSame = values.every(function (v) { return v === values[0]; });
+        if (allSame && !(setup.rowAmounts === "sum" && values.length > 1)) return values[0];
+        if (setup.rowAmounts === "sum") return values.reduce(function (a, b) { return a + b; }, 0);
+        once(label + ": " + what + " differs between classification lines (" + values.map(fmt).join(" and ") + "). New York takes one amount per worker for the week. Add a pay totals file, or tick the box that adds up the pay amounts in the hours file.");
+        return values[0];
+      };
+      var money = {};
+      MONEY_FIELDS.forEach(function (f) {
+        var vals = [];
+        lines.forEach(function (line) { if (own(line.money, f)) vals.push(line.money[f]); });
+        var v = weekly(vals, t && own(t.money, f) ? t.money[f] : undefined, f === "gross_pay" ? "gross pay" : "\"" + (c[f] || f) + "\"");
+        if (v !== undefined) money[f] = v;
+      });
+      var other = {};
+      var otherHeads = [];
+      lines.forEach(function (line) { Object.keys(line.other).forEach(function (h) { if (otherHeads.indexOf(h) < 0) otherHeads.push(h); }); });
+      if (t) Object.keys(t.other).forEach(function (h) { if (otherHeads.indexOf(h) < 0) otherHeads.push(h); });
+      otherHeads.forEach(function (h) {
+        var vals = [];
+        lines.forEach(function (line) { if (own(line.other, h)) vals.push(line.other[h]); });
+        var v = weekly(vals, t && own(t.other, h) ? t.other[h] : undefined, "\"" + h + "\"");
+        if (v !== undefined) other[h] = v;
+      });
+      if (setup.deductionsRule === "sum") {
+        var sum = 0;
+        TAX_FIELDS.forEach(function (f) { if (own(money, f)) sum += money[f]; });
+        Object.keys(other).forEach(function (h) { sum += other[h]; });
+        money.total_deductions = sum;
+      }
+      if (setup.netRule === "calc" && own(money, "gross_pay")) {
+        money.net_pay = money.gross_pay - (own(money, "total_deductions") ? money.total_deductions : 0);
+      }
+      if (grossSource && !own(money, "gross_pay") && !(totals && !t)) problems.push(label + ": no gross pay found for this worker.");
+      if (!own(money, "net_pay") && !(totals && !t)) once(label + ": no net pay found. New York wants net wages for each worker. Pick the net pay column, or tick the box that works it out.");
+
+      var ded = [];
+      LABELS.forEach(function (l) {
+        if (own(money, l[0]) && money[l[0]] !== 0) ded.push([l[1], money[l[0]]]);
+      });
+      Object.keys(other).forEach(function (h) {
+        if (other[h] !== 0) ded.push([h.replace(/[:;]/g, " ").replace(/\s+/g, " ").trim(), other[h]]);
+      });
+      if (!ded.length && own(money, "total_deductions") && money.total_deductions !== 0) {
+        ded.push(["Total Deductions", money.total_deductions]);
+        onlyTotal++;
+      }
+      ded.forEach(function (d) {
+        if (d[1] < 0) problems.push(label + ": the deduction \"" + d[0] + "\" is below 0 (" + fmt(d[1]) + "). The state takes no negative deductions.");
+      });
+
+      var apprentice = "N";
+      for (var a = 0; a < lines.length; a++) {
+        if (lines[a].text.apprentice) {
+          apprentice = lines[a].text.apprentice;
+          break;
+        }
+      }
+
+      // Labor lines become New York work categories. Two lines with the same category are one, with their days added.
+      var cats = new Map();
+      lines.forEach(function (line) {
+        var m = own(setup.classes, line.cls) ? setup.classes[line.cls] : {};
+        var cat = (m.work_category || line.cls || "").trim();
+        if (!cat) {
+          needCat[line.cls] = true;
+          return;
+        }
+        var rates = {};
+        ["st_rate", "ot_rate"].forEach(function (f) {
+          if (own(line.money, f)) rates[f] = line.money[f];
+          else if (t && own(t.money, f)) rates[f] = t.money[f];
+        });
+        if (!own(rates, "ot_rate") && own(rates, "st_rate") && setup.otRule === "x1.5") rates.ot_rate = Math.floor((rates.st_rate * 3 + 1) / 2);
+        var where = label + ", " + cat;
+        if (!own(rates, "st_rate")) once(where + ": no straight time rate. Pick the rate column in step 2.");
+        if (!own(rates, "ot_rate")) once(where + ": no overtime rate. New York wants one on every work category, even in a week with no overtime. Pick an overtime rate column, or choose straight rate times 1.5.");
+        ["st_rate", "ot_rate"].forEach(function (f) {
+          if (own(rates, f) && !cents2(rates[f])) once(where + ": the " + (f === "st_rate" ? "straight time" : "overtime") + " rate " + fmtRate(rates[f]) + " has more than 2 decimal places. New York takes rates to the cent.");
+        });
+        var fr = {};
+        NY_FRINGES.forEach(function (f) {
+          var raw = (m[f] || "").trim();
+          if (raw === "") return;
+          var v = parseRate(raw);
+          if (v === null || v === "" || v < 0 || !cents2(v)) once("The " + f + " fringe for \"" + (line.cls || "every row") + "\" should be an amount per hour with at most 2 decimals, like 12.50, but has \"" + raw + "\".");
+          else if (v !== 0) fr[f] = fmtRate(v);
+        });
+        var expl = (m.other_explanation || "").trim();
+        if (fr.other && !expl) once("The other fringe for \"" + (line.cls || "every row") + "\" needs a name, like Annuity. The state rejects it without one.");
+        var cur = cats.get(cat);
+        if (!cur) {
+          cur = { rates: rates, fr: fr, expl: expl, days: new Map(), cls: line.cls };
+          cats.set(cat, cur);
+        } else {
+          ["st_rate", "ot_rate"].forEach(function (f) {
+            if (own(rates, f) && own(cur.rates, f) && rates[f] !== cur.rates[f]) once(where + ": two lines with this work category have different " + (f === "st_rate" ? "straight time" : "overtime") + " rates, " + fmtRate(cur.rates[f]) + " and " + fmtRate(rates[f]) + ". Give them different work category names.");
+            if (own(rates, f) && !own(cur.rates, f)) cur.rates[f] = rates[f];
+          });
+          if (JSON.stringify(fr) !== JSON.stringify(cur.fr) || expl !== cur.expl) once(where + ": \"" + cur.cls + "\" and \"" + line.cls + "\" both become this work category but have different fringes. Make them match, or give them different work category names.");
+        }
+        line.days.forEach(function (d, date) {
+          var x = cur.days.get(date);
+          if (!x) {
+            x = { st: 0, ot: 0 };
+            cur.days.set(date, x);
+          }
+          x.st += d.st;
+          x.ot += d.ot;
+        });
+      });
+
+      cats.forEach(function (cur, cat) {
+        nLines++;
+        Array.from(cur.days.keys()).sort().forEach(function (date) {
+          var d = cur.days.get(date);
+          nDays++;
+          var rec = {
+            prc_number: prc, week_ending: g.begin ? g.end : "",
+            last_name: p.last_name, first_name: p.first_name, middle_name: p.middle_initial,
+            ssn_last4: last4 || "", date_of_birth: last4 ? "" : dob, apprentice: apprentice,
+            address1: p.address1, address2: p.address2, city: p.city, state: p.home_state, zip: p.zip, country: "",
+            gross_earnings: own(money, "gross_pay") ? fmt(money.gross_pay) : "",
+            net_wages: own(money, "net_pay") ? fmt(money.net_pay) : "",
+            deductions: ded.map(function (x) { return x[0] + ":" + fmt(x[1]); }).join(";"),
+            work_category: cat,
+            st_rate: own(cur.rates, "st_rate") ? fmtRate(cur.rates.st_rate) : "",
+            ot_rate: own(cur.rates, "ot_rate") ? fmtRate(cur.rates.ot_rate) : "",
+            other_explanation: cur.fr.other ? cur.expl : "",
+            work_date: date, st_hours: fmtHours(d.st), ot_hours: fmtHours(d.ot)
+          };
+          NY_FRINGES.forEach(function (f) { rec[f] = cur.fr[f] || ""; });
+          out.push(NY_COLS.map(function (col) { return csvCell(rec[col]); }).join(","));
+        });
+      });
+    });
+
+    Object.keys(needCat).forEach(function (cls) {
+      problems.push(cls === "" ? "Fill in the work category, like Laborer - Building, the way the prevailing rate schedule names it." : "Fill in the work category for \"" + cls + "\".");
+    });
+    if (unmatched.length) problems.push("The pay totals file has no row for: " + unmatched.join("; ") + ". Names must match the hours file" + (byId ? "" : ", or pick an ID column in both files") + ".");
+    if (both) notes.push(plural(both, "worker has", "workers have") + " both an SSN and a date of birth. The state takes one, so the file carries the last 4 of the SSN.");
+    if (onlyTotal) notes.push(plural(onlyTotal, "worker has", "workers have") + " total deductions but no breakdown, so the file lists one deduction called Total Deductions. The state asks for each deduction by type. Pick the tax and other deduction columns if your file has them.");
+    if (totals) {
+      var extra = 0;
+      totals.forEach(function (rec, key) { if (!own(used, key)) extra++; });
+      if (extra) notes.push(plural(extra, "worker", "workers") + " in the pay totals file had no hours in the hours file and were left out.");
+    }
+
+    if (problems.length) throw new MapError(problems);
+    return { csv: out.join("\n") + "\n", notes: notes, employees: g.emps.size, lines: nLines, days: nDays };
+  }
+
   return {
     CANON: CANON,
+    NY_COLS: NY_COLS,
+    NY_PERSON_FIELDS: NY_PERSON_FIELDS,
+    NY_FRINGES: NY_FRINGES,
+    buildNy: buildNy,
     MapError: MapError,
     readTable: readTable,
     parseDate: parseDate,

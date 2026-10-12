@@ -202,8 +202,17 @@
     worker.appendChild(colField(s.cols, "middle_initial", "Middle initial", "", list, refresh));
     worker.appendChild(colField(s.cols, "employee_id", "Worker ID", "Your own number for the worker.", list, refresh));
     worker.appendChild(colField(s.cols, "ssn", "SSN or last 4", "A masked SSN like XXX-XX-1234 keeps its last 4.", list, refresh));
-    worker.appendChild(colField(s.cols, "gender", "Gender", "", list, refresh));
-    worker.appendChild(colField(s.cols, "ethnicity", "Ethnicity", "", list, refresh));
+    if (s.target === "ny") {
+      worker.appendChild(colField(s.cols, "date_of_birth", "Date of birth", "New York takes the last 4 of the SSN or the birth date.", list, refresh));
+      worker.appendChild(colField(s.cols, "address1", "Street address", "The worker's home address.", list, refresh));
+      worker.appendChild(colField(s.cols, "address2", "Apt or suite", "", list, refresh));
+      worker.appendChild(colField(s.cols, "city", "City", "", list, refresh));
+      worker.appendChild(colField(s.cols, "home_state", "State", "", list, refresh));
+      worker.appendChild(colField(s.cols, "zip", "ZIP", "", list, refresh));
+    } else {
+      worker.appendChild(colField(s.cols, "gender", "Gender", "", list, refresh));
+      worker.appendChild(colField(s.cols, "ethnicity", "Ethnicity", "", list, refresh));
+    }
 
     var work = clear($("cols-work"));
     work.appendChild(colField(s.cols, "classification", "Work classification", "Laborer, Carpenter and so on, the way your payroll names them.", list, refresh));
@@ -211,12 +220,14 @@
       s.jobs = [];
       refresh();
     }));
-    work.appendChild(colField(s.cols, "project_id", "Project ID", "Only if the state's project ID is a column in the file.", list, function () {
-      syncPayroll();
-      refresh();
-    }));
-    work.appendChild(colField(s.cols, "craft_code", "Craft code", "Only if the file already holds the state's codes. Pick both.", list, refresh));
-    work.appendChild(colField(s.cols, "labor_class", "Labor class", "", list, refresh));
+    if (s.target !== "ny") {
+      work.appendChild(colField(s.cols, "project_id", "Project ID", "Only if the state's project ID is a column in the file.", list, function () {
+        syncPayroll();
+        refresh();
+      }));
+      work.appendChild(colField(s.cols, "craft_code", "Craft code", "Only if the file already holds the state's codes. Pick both.", list, refresh));
+      work.appendChild(colField(s.cols, "labor_class", "Labor class", "", list, refresh));
+    }
 
     renderHoursGrid();
 
@@ -234,7 +245,10 @@
 
     otherChecks($("other-hours"), list, s.otherDeductionCols);
     var extra = clear($("cols-extra"));
-    [["project_gross", "Gross for this project only", "Leave out and the tool uses the rates times the hours."], ["lump_sum", "Lump sum or cash fringe", ""], ["apprentice", "Apprentice (Y or N)", ""], ["apprentice_id", "Apprentice ID", ""], ["apprentice_pct", "Apprentice wage percentage", ""]].forEach(function (f) {
+    (s.target === "ny"
+      ? [["apprentice", "NYS registered apprentice (Y or N)", ""]]
+      : [["project_gross", "Gross for this project only", "Leave out and the tool uses the rates times the hours."], ["lump_sum", "Lump sum or cash fringe", ""], ["apprentice", "Apprentice (Y or N)", ""], ["apprentice_id", "Apprentice ID", ""], ["apprentice_pct", "Apprentice wage percentage", ""]]
+    ).forEach(function (f) {
       extra.appendChild(colField(s.cols, f[0], f[1], f[2], list));
     });
 
@@ -313,9 +327,13 @@
     if (!info.people.length) {
       wrap.appendChild(el("p", { class: "hint", text: "No workers found yet. Check the column picks in step 2." }));
     } else {
+      var ny = s.target === "ny";
       var table = el("table");
       var head = el("tr");
-      ["Last name", "First name", "MI", "SSN or last 4", "Your ID", "Gender", "Ethnicity", "Straight", "Overtime"].forEach(function (h) {
+      (ny
+        ? ["Last name", "First name", "MI", "SSN or last 4", "Birth date", "Street address", "Apt or suite", "City", "State", "ZIP", "Straight", "Overtime"]
+        : ["Last name", "First name", "MI", "SSN or last 4", "Your ID", "Gender", "Ethnicity", "Straight", "Overtime"]
+      ).forEach(function (h) {
         head.appendChild(el("th", { scope: "col", text: h }));
       });
       table.appendChild(el("thead", null, [head]));
@@ -344,6 +362,15 @@
         });
         gender.value = g;
         gender.addEventListener("change", function () { set("gender", gender.value); });
+        if (ny) {
+          body.appendChild(el("tr", null, [
+            text("last_name", "Last name"), text("first_name", "First name"), text("middle_initial", "Middle initial", true),
+            text("ssn", "SSN or last 4"), text("date_of_birth", "Birth date"), text("address1", "Street address"), text("address2", "Apt or suite"),
+            text("city", "City"), text("home_state", "State", true), text("zip", "ZIP"),
+            el("td", { class: "num", text: p.st }), el("td", { class: "num", text: p.ot })
+          ]));
+          return;
+        }
         body.appendChild(el("tr", null, [
           text("last_name", "Last name"), text("first_name", "First name"), text("middle_initial", "Middle initial", true),
           text("ssn", "SSN or last 4"), text("employee_id", "Your ID"), el("td", null, [gender]), text("ethnicity", "Ethnicity"),
@@ -358,13 +385,20 @@
     $("classes-wrap").hidden = info.directCodes || !info.classes.length;
     if (!$("classes-wrap").hidden) {
       var ctable = el("table");
-      ctable.appendChild(el("thead", null, [el("tr", null, [el("th", { scope: "col", text: "Classification in your file" }), el("th", { scope: "col", text: "Craft code" }), el("th", { scope: "col", text: "Labor class" })])]));
+      var cny = s.target === "ny";
+      var chead = el("tr");
+      (cny
+        ? ["Classification in your file", "Work category", "Health", "Vacation", "Training", "Pension", "Other", "Other name"]
+        : ["Classification in your file", "Craft code", "Labor class"]
+      ).forEach(function (h) { chead.appendChild(el("th", { scope: "col", text: h })); });
+      ctable.appendChild(el("thead", null, [chead]));
       var cbody = el("tbody");
       info.classes.forEach(function (cls) {
         var cur = own(s.classes, cls) ? s.classes[cls] : {};
         var shown = cls === "" ? "(every row)" : cls;
-        var input = function (f, label) {
+        var input = function (f, label, hint) {
           var box = el("input", { type: "text", value: cur[f] || "", "aria-label": label + " for " + shown, autocomplete: "off" });
+          if (hint) box.placeholder = hint;
           box.addEventListener("input", function () {
             if (!own(s.classes, cls)) s.classes[cls] = {};
             s.classes[cls][f] = box.value.trim();
@@ -372,6 +406,12 @@
           });
           return el("td", null, [box]);
         };
+        if (cny) {
+          cbody.appendChild(el("tr", null, [el("td", { text: shown }), input("work_category", "Work category", cls),
+            input("health", "Health fringe"), input("vacation", "Vacation fringe"), input("training", "Training fringe"),
+            input("pension", "Pension fringe"), input("other", "Other fringe"), input("other_explanation", "Other fringe name")]));
+          return;
+        }
         cbody.appendChild(el("tr", null, [el("td", { text: shown }), input("craft_code", "Craft code"), input("labor_class", "Labor class")]));
       });
       ctable.appendChild(cbody);
@@ -400,13 +440,22 @@
 
   // ---- step 3: the payroll facts ----
 
-  var PAYROLL_KEYS = ["vendor_id", "contract_id", "payroll_number", "period_begin", "fringe_type", "project_id"];
+  var PAYROLL_KEYS = ["vendor_id", "contract_id", "payroll_number", "period_begin", "fringe_type", "project_id", "prc_number"];
 
   function syncPayroll() {
     var p = state.setup.payroll;
     if (prlmap.parseDate(p.period_begin)) p.period_begin = prlmap.parseDate(p.period_begin); // the date box wants 2026-10-04
-    PAYROLL_KEYS.forEach(function (k) { $("p-" + k).value = p[k]; });
-    $("p-project-wrap").hidden = !!state.setup.cols.project_id;
+    PAYROLL_KEYS.forEach(function (k) { $("p-" + k).value = p[k] || ""; });
+    $("p-project-wrap").hidden = state.setup.target === "ny" || !!state.setup.cols.project_id;
+  }
+
+  // Which state system the file is for: Payroll XML for a state DOT, or the New York State DOL upload.
+  function syncTarget() {
+    var ny = state.setup.target === "ny";
+    Array.prototype.forEach.call(document.querySelectorAll(".ny-only"), function (n) { n.hidden = !ny; });
+    Array.prototype.forEach.call(document.querySelectorAll(".aashto-only"), function (n) { n.hidden = ny; });
+    Array.prototype.forEach.call(document.querySelectorAll('input[name="target"]'), function (r) { r.checked = r.value === state.setup.target; });
+    $("convert").textContent = ny ? "Convert to the New York upload file" : "Convert to Payroll XML";
   }
 
   PAYROLL_KEYS.forEach(function (k) {
@@ -471,7 +520,7 @@
       var moved = prlmap.addDays(begin, Math.floor(days(begin, info.minDate) / 7) * 7);
       if (info.maxDate <= prlmap.addDays(moved, 6)) {
         s.payroll.period_begin = moved;
-        notes.push("The pay week moved to start " + moved + ", the same weekday as in the saved setup. The payroll number is still " + (s.payroll.payroll_number || "blank") + ". Change it for this week.");
+        notes.push("The pay week moved to start " + moved + ", the same weekday as in the saved setup." + (s.target === "ny" ? "" : " The payroll number is still " + (s.payroll.payroll_number || "blank") + ". Change it for this week."));
       }
     } else if (begin && !info.minDate) {
       notes.push("The rows in this file carry no dates, so the page cannot tell which week it is. From the saved setup, the pay week still starts " + begin + " and the payroll number is still " + (s.payroll.payroll_number || "blank") + ". Change both in step 3 if this is a new week.");
@@ -492,6 +541,7 @@
     if (!ready) return;
     renderMatch();
     syncPayroll();
+    syncTarget();
     refresh();
   }
 
@@ -514,6 +564,7 @@
       var guess = prlmap.guess(table);
       var old = state.setup;
       PAYROLL_KEYS.forEach(function (k) { if (old.payroll[k]) guess.payroll[k] = old.payroll[k]; });
+      guess.target = old.target;
       guess.people = old.people;
       guess.classes = old.classes;
       guess.totals = old.totals;
@@ -637,7 +688,49 @@
     $("result").scrollIntoView({ block: "nearest" });
   }
 
+  function convertNy() {
+    var name = state.hours.name;
+    var built;
+    try {
+      built = prlmap.buildNy(state.hours.table, state.totals ? state.totals.table : null, state.setup);
+    } catch (e) {
+      if (!(e instanceof prlmap.MapError)) throw e;
+      show({ name: name, ok: false, verdict: "Not ready to convert. " + plural(e.problems.length, "thing", "things") + " to sort out first.", problems: e.problems });
+      return;
+    }
+    var xml;
+    try {
+      xml = nydol.convertCsv(built.csv);
+    } catch (e) {
+      if (!(e instanceof nydol.ConvertError)) throw e;
+      show({ name: name, ok: false, verdict: "The matched rows did not convert.", problems: [e.message], facts: "Row numbers in this message count the matched rows. Download the matched CSV to see them.", notes: built.notes, csv: built.csv, outName: baseName(name) });
+      return;
+    }
+    var res = nydol.checkXml(xml, DOMParser);
+    var begin = prlmap.parseDate(state.setup.payroll.period_begin);
+    var facts = plural(built.employees, "worker", "workers") + ", " + plural(built.lines, "work category line", "work category lines") + ", " + plural(built.days, "day row", "day rows") + ". Week ending " + prlmap.addDays(begin, 6) + ", PRC number " + state.setup.payroll.prc_number + ".";
+    show({
+      name: name,
+      ok: res.errors.length === 0,
+      verdict: res.errors.length > 0
+        ? "Converted, with " + plural(res.errors.length, "problem", "problems") + " to fix before you upload."
+        : res.warnings.length > 0 ? "Converted. No problems, " + plural(res.warnings.length, "warning", "warnings") + " to look at."
+        : "Converted. New York's rules check clean.",
+      facts: facts,
+      problems: res.errors,
+      warnings: res.warnings,
+      notes: built.notes,
+      xml: xml,
+      csv: built.csv,
+      outName: baseName(name)
+    });
+  }
+
   function convert() {
+    if (state.setup.target === "ny") {
+      convertNy();
+      return;
+    }
     var name = state.hours.name;
     var built;
     try {
@@ -727,6 +820,27 @@
     // The column picks above are the page's own guess. The rest is what a person would type.
     prlmapSamples.fill(state.setup);
     showAll(["Sample loaded. The people and numbers are made up. The column picks are the page's own guess from the column names. The payroll facts, the job, the worker details and the codes were typed in for you, the way you would for your own file."]);
+  });
+  $("sample-ny").addEventListener("click", function () {
+    state.setupFrom = "";
+    state.setup = prlmap.emptySetup();
+    state.setup.target = "ny";
+    state.totals = null;
+    state.hours = null;
+    setHours(prlmapSamples.NY_CSV, "ny week.csv");
+    prlmapSamples.fillNy(state.setup);
+    showAll(["New York sample loaded. The people and numbers are made up. The column picks are the page's own guess from the column names. The PRC number, the pay week and the work categories with their supplement rates were typed in for you, the way you would for your own file."]);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="target"]'), function (r) {
+    r.addEventListener("change", function () {
+      if (!r.checked) return;
+      state.setup.target = r.value;
+      stale();
+      renderMatch();
+      syncPayroll();
+      syncTarget();
+      refresh();
+    });
   });
   $("header-row").addEventListener("change", function () {
     var n = parseInt($("header-row").value, 10);
