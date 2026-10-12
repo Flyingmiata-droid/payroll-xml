@@ -599,14 +599,61 @@ def check_file(path: Path, schema_dir: Path):
     return errors, warnings, schema_msgs
 
 
+def header(path: Path):
+    """PRC number and week ending date of one upload file. None when it is not readable."""
+    from lxml import etree
+
+    try:
+        root = tree_from_lxml(etree.parse(str(path)).getroot())
+    except (etree.XMLSyntaxError, OSError):
+        return None
+    if root.tag != "ProjectRollup":
+        return None
+    def v(tag):  # JS trim() also drops U+FEFF
+        return (root.val(tag) or "").strip("\ufeff").strip()
+
+    return {"prc": v("prcNumber"), "week": v("weekEndingDate")}
+
+
+def across(items):
+    """Warnings about upload files that clash. items: (name, header or None) pairs, in order."""
+    out = []
+    ok = [(n, h) for n, h in items if h and h["prc"]]
+    for i in range(len(ok)):
+        a, ha = ok[i]
+        for b, hb in ok[i + 1:]:
+            if ha["prc"] != hb["prc"]:
+                continue
+            m = re.match(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", ha["week"])
+            n = re.match(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", hb["week"])
+            if m and n and m[0] == n[0]:
+                out.append(f"{a} and {b} are both PRC {ha['prc']}, week ending {m[0]}. The state takes one file per project per week; if one is not a correction of the other, check the week")
+    return out
+
+
+def _report(path: Path, schema_dir: Path) -> bool:
+    errors, warnings, schema_msgs = check_file(path, schema_dir)
+    if schema_msgs is None:
+        print(f"SKIP schema: {NY_XSD} not found in {schema_dir}. Run: python -m prlxml.fetch_schemas ny")
+    for m in schema_msgs or []:
+        print(f"SCHEMA {m}")
+    for m in errors:
+        print(f"RULE {m}")
+    for m in warnings:
+        print(f"WARN {m}")
+    bad = bool(errors or schema_msgs)
+    print("FAIL" if bad else "OK")
+    return not bad
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m prlxml.nydol", description="New York DOL certified payroll bulk upload XML")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("convert", help="CSV to NYS DOL XML")
     c.add_argument("csv")
     c.add_argument("-o", "--out")
-    k = sub.add_parser("check", help="check a NYS DOL XML file")
-    k.add_argument("xml")
+    k = sub.add_parser("check", help="check NYS DOL XML files, one or several")
+    k.add_argument("xml", nargs="+")
     k.add_argument("--schemas", default="schemas/nydol")
     a = ap.parse_args(argv)
     if a.cmd == "convert":
@@ -619,19 +666,24 @@ def main(argv=None):
         out.write_text(xml, encoding="utf-8", newline="\n")
         print(f"wrote {out}")
         return 0
-    errors, warnings, schema_msgs = check_file(Path(a.xml), Path(a.schemas))
-    if schema_msgs is None:
-        print(f"SKIP schema: {NY_XSD} not found in {a.schemas}. Run: python -m prlxml.fetch_schemas ny")
-    for m in schema_msgs or []:
-        print(f"SCHEMA {m}")
-    for m in errors:
-        print(f"RULE {m}")
-    for m in warnings:
-        print(f"WARN {m}")
-    bad = bool(errors or schema_msgs)
-    print("FAIL" if bad else "OK")
-    return 1 if bad else 0
+    from . import expand_globs
 
+    paths = expand_globs(a.xml)
+    if len(paths) == 1:
+        return 0 if _report(paths[0], Path(a.schemas)) else 1
+    bad = 0
+    for x in paths:
+        print(f"== {x}")
+        if not _report(x, Path(a.schemas)):
+            bad += 1
+    clash = across([(str(x), header(x)) for x in paths])
+    if clash:
+        print("== across files")
+    for c in clash:
+        print(f"WARN {c}")
+    tail = f", {len(clash)} warning{'s' if len(clash) != 1 else ''} across files" if clash else ""
+    print(f"{len(paths)} files: {len(paths) - bad} OK, {bad} with errors{tail}")
+    return 1 if bad else 0
 
 if __name__ == "__main__":
     sys.exit(main())

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from lxml import etree
 
-from . import MAIN_XSD, PRL_NS
+from . import MAIN_XSD, PRL_NS, expand_globs
 
 NS = {"p": PRL_NS}
 
@@ -406,13 +406,46 @@ def warnings(xml_path: Path):
     return scan(xml_path)[1]
 
 
-def main(argv=None) -> int:
-    p = argparse.ArgumentParser(description="Check a Payroll XML file against the schema and the import rules")
-    p.add_argument("xml", type=Path)
-    p.add_argument("--schemas", type=Path, default=Path("schemas"))
-    a = p.parse_args(argv)
-    s = schema_errors(a.xml, a.schemas)
-    r, w = scan(a.xml)
+_HEADER = (("vendor", "vendorID"), ("contract", "contractID"), ("number", "payrollNumber"),
+           ("begin", "payrollBeginDate"), ("end", "payrollEndDate"))
+
+
+def header(xml_path: Path):
+    """The fields that place one payroll among others. None when the file is not readable Payroll XML."""
+    try:
+        root = etree.parse(str(xml_path)).getroot()
+    except (etree.XMLSyntaxError, OSError):
+        return None
+    if etree.QName(root).localname != "Payroll" or etree.QName(root).namespace != PRL_NS:
+        return None
+    return {k: _t(root, tag).strip("\ufeff").strip() for k, tag in _HEADER}  # JS trim() also drops U+FEFF
+
+
+def across(items):
+    """Warnings about files that clash with each other. items: (name, header or None) pairs, in order."""
+    out = []
+    ok = [(n, h) for n, h in items if h and h["contract"]]
+    for i in range(len(ok)):
+        a, ha = ok[i]
+        for b, hb in ok[i + 1:]:
+            if (ha["vendor"], ha["contract"]) != (hb["vendor"], hb["contract"]):
+                continue
+            who = f"contract {ha['contract']}" + (f", vendor {ha['vendor']}" if ha["vendor"] else "")
+            if ha["number"] and ha["number"] == hb["number"]:
+                out.append(f"{a} and {b} are both payroll number {ha['number']} for {who}. If one is not a correction of the other, renumber it")
+                continue
+            try:
+                a0, a1, b0, b1 = _d(ha["begin"]), _d(ha["end"]), _d(hb["begin"]), _d(hb["end"])
+            except ValueError:
+                continue
+            if a0 <= b1 and b0 <= a1:
+                out.append(f"{a} (payroll {ha['number']}, {a0} to {a1}) and {b} (payroll {hb['number']}, {b0} to {b1}) cover the same days for {who}")
+    return out
+
+
+def _report(xml_path: Path, schema_dir: Path) -> bool:
+    s = schema_errors(xml_path, schema_dir)
+    r, w = scan(xml_path)
     for e in s:
         print(f"SCHEMA  {e}")
     for e in r:
@@ -421,10 +454,34 @@ def main(argv=None) -> int:
         print(f"WARN    {e}")
     if not s and not r:
         tail = f", {len(w)} warning{'s' if len(w) != 1 else ''} to look at" if w else ""
-        print(f"OK {a.xml}: schema valid, rules clean{tail}")
-        return 0
+        print(f"OK {xml_path}: schema valid, rules clean{tail}")
+        return True
     print(f"{len(s)} schema errors, {len(r)} rule errors, {len(w)} warnings")
-    return 1
+    return False
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description="Check Payroll XML files against the schema and the import rules")
+    p.add_argument("xml", type=Path, nargs="+", help="one file, or several (a week per file) to check together")
+    p.add_argument("--schemas", type=Path, default=Path("schemas"))
+    a = p.parse_args(argv)
+    a.xml = expand_globs(a.xml)
+    if len(a.xml) == 1:
+        return 0 if _report(a.xml[0], a.schemas) else 1
+    bad = 0
+    for x in a.xml:
+        print(f"== {x}")
+        if not _report(x, a.schemas):
+            bad += 1
+    clash = across([(str(x), header(x)) for x in a.xml])
+    if clash:
+        print("== across files")
+    for c in clash:
+        print(f"WARN    {c}")
+    n = len(a.xml)
+    tail = f", {len(clash)} warning{'s' if len(clash) != 1 else ''} across files" if clash else ""
+    print(f"{n} files: {n - bad} OK, {bad} with errors{tail}")
+    return 1 if bad else 0
 
 
 if __name__ == "__main__":

@@ -27,7 +27,14 @@
     return name.replace(/\.[^.]*$/, "") || "payroll";
   }
 
+  var collecting = null; // while set, show() hands its result here instead of drawing it
+
   function show(opts) {
+    if (collecting) collecting.push(opts);
+    else render(opts);
+  }
+
+  function render(opts) {
     $("result").hidden = false;
     $("result-name").textContent = opts.name;
     var verdict = $("verdict");
@@ -146,43 +153,104 @@
     return /^\s*</.test(head);
   }
 
-  function handleFile(file) {
-    if (!file) return;
+  // Reads one file. Resolves to {kind, text} or, when it cannot be read, {opts}.
+  function loadFile(file) {
     var lower = file.name.toLowerCase();
     if (!/\.(csv|xml|txt)$/.test(lower)) {
-      show({ name: file.name, ok: false, verdict: "This page reads .csv and .xml files.", facts: "In Excel, use File, Save As, CSV UTF-8.", hideSchemaNote: true });
-      return;
+      return Promise.resolve({ opts: { name: file.name, ok: false, verdict: "This page reads .csv and .xml files.", facts: "In Excel, use File, Save As, CSV UTF-8.", hideSchemaNote: true } });
     }
-    file.arrayBuffer().then(function (buf) {
+    return file.arrayBuffer().then(function (buf) {
       var bytes = new Uint8Array(buf);
-      var text;
       if (looksLikeXml(file.name, bytes)) {
         try {
-          text = prlxml.decodeXmlBytes(bytes);
+          return { kind: "xml", text: prlxml.decodeXmlBytes(bytes) };
         } catch (e) {
-          show({ name: file.name, ok: false, verdict: "This file cannot be read as XML.", problems: ["not well-formed XML: " + e.message], hideSchemaNote: true });
-          return;
+          return { opts: { name: file.name, ok: false, verdict: "This file cannot be read as XML.", problems: ["not well-formed XML: " + e.message], hideSchemaNote: true } };
         }
-        handleXml(text, file.name);
+      }
+      try {
+        return { kind: "csv", text: prlxml.decodeCsvBytes(bytes) };
+      } catch (e) {
+        if (!(e instanceof prlxml.ConvertError)) throw e;
+        return { opts: { name: file.name, ok: false, verdict: "This CSV did not convert.", problems: [e.message], hideSchemaNote: true } };
+      }
+    });
+  }
+
+  // The result for one loaded file, plus the fields that place it among the others.
+  function resultOf(loaded, name) {
+    if (loaded.opts) return { opts: loaded.opts, header: null };
+    var got = [];
+    collecting = got;
+    try {
+      (loaded.kind === "xml" ? handleXml : handleCsv)(loaded.text, name);
+    } finally {
+      collecting = null;
+    }
+    var xml = got[0].xml || (loaded.kind === "xml" ? loaded.text : "");
+    return { opts: got[0], header: xml ? nydol.headerOf(xml, DOMParser) : null };
+  }
+
+  function renderBatch(results) {
+    var n = results.length;
+    var bad = results.filter(function (r) { return !r.opts.ok; }).length;
+    var clashes = nydol.acrossFiles(results.map(function (r) { return { name: r.opts.name, header: r.header }; }));
+    $("result").hidden = true;
+    current = null;
+    $("batch").hidden = false;
+    var verdict = $("batch-verdict");
+    verdict.textContent = plural(n, "file", "files") + ": " + (n - bad) + " OK, " + bad + " with problems" +
+      (clashes.length ? ", " + plural(clashes.length, "clash", "clashes") + " between files." : ".");
+    verdict.className = "verdict " + (bad || clashes.length ? "bad" : "ok");
+    var list = $("batch-list");
+    list.textContent = "";
+    results.forEach(function (r) {
+      var li = document.createElement("li");
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "file-row " + (r.opts.ok ? "ok" : "bad");
+      b.textContent = r.opts.name + ": " + r.opts.verdict;
+      b.addEventListener("click", function () { render(r.opts); });
+      li.appendChild(b);
+      list.appendChild(li);
+    });
+    var warn = $("batch-warnings");
+    warn.textContent = "";
+    clashes.forEach(function (c) {
+      var li = document.createElement("li");
+      li.textContent = c;
+      warn.appendChild(li);
+    });
+    warn.hidden = !clashes.length;
+    $("batch-warn-label").hidden = warn.hidden;
+    $("batch").scrollIntoView({ block: "nearest" });
+  }
+
+  function handleFiles(fileList) {
+    var files = Array.prototype.slice.call(fileList || []);
+    if (!files.length) return;
+    var safe = function (file) {
+      return loadFile(file).catch(function () {
+        return { opts: { name: file.name, ok: false, verdict: "This file could not be read.", hideSchemaNote: true } };
+      });
+    };
+    Promise.all(files.map(safe)).then(function (loaded) {
+      var results = loaded.map(function (l, i) { return resultOf(l, files[i].name); });
+      if (results.length === 1) {
+        $("batch").hidden = true;
+        render(results[0].opts);
       } else {
-        try {
-          text = prlxml.decodeCsvBytes(bytes);
-        } catch (e) {
-          if (!(e instanceof prlxml.ConvertError)) throw e;
-          show({ name: file.name, ok: false, verdict: "This CSV did not convert.", problems: [e.message], hideSchemaNote: true });
-          return;
-        }
-        handleCsv(text, file.name);
+        renderBatch(results);
       }
     });
   }
 
   $("choose").addEventListener("click", function () { fileInput.click(); });
   fileInput.addEventListener("change", function () {
-    handleFile(fileInput.files[0]);
+    handleFiles(fileInput.files);
     fileInput.value = "";
   });
-  $("sample").addEventListener("click", function () { handleText(nydol.SAMPLE_CSV, "ny week1.csv"); });
+  $("sample").addEventListener("click", function () { $("batch").hidden = true; handleText(nydol.SAMPLE_CSV, "ny week1.csv"); });
   $("download").addEventListener("click", function () {
     if (current) save(current.xml, current.name, "application/xml");
   });
@@ -204,6 +272,6 @@
   drop.addEventListener("drop", function (e) {
     e.preventDefault();
     drop.classList.remove("over");
-    if (e.dataTransfer && e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
   });
 })();

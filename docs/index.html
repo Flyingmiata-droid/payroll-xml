@@ -172,6 +172,11 @@
   }
   ul.problems.warnings li { background: var(--warn-wash); border-left-color: var(--warn); }
   .warn-label { margin: 0 0 6px; font-weight: 700; }
+  ul.file-list { margin: 0 0 16px; padding: 0; list-style: none; }
+  ul.file-list li { margin-bottom: 6px; }
+  .file-row { display: block; width: 100%; text-align: left; background: transparent; color: var(--ink); border-color: var(--rule); overflow-wrap: anywhere; }
+  .file-row.ok { border-left: 6px solid var(--ok-ink); }
+  .file-row.bad { border-left: 6px solid var(--stop); }
   .not-checked { margin: 14px 0 0; font-size: 0.95rem; color: var(--muted); }
   details { margin-top: 14px; }
   summary { cursor: pointer; font-weight: 700; }
@@ -227,13 +232,22 @@
     <legend>Your file</legend>
     <div class="drop" id="drop">
       <p class="drop-title">Drop a CSV or a Payroll XML file here</p>
-      <p class="drop-note">A CSV gets converted to XML, then checked. An XML file gets checked.</p>
+      <p class="drop-note">A CSV gets converted to XML, then checked. An XML file gets checked. Several weeks at once? Drop them together and the page also looks for two files that cover the same week.</p>
       <div class="actions">
         <button type="button" class="primary" id="choose">Choose a file</button>
-        <input type="file" id="file" accept=".csv,.xml,text/csv,text/xml,application/xml">
+        <input type="file" id="file" multiple accept=".csv,.xml,text/csv,text/xml,application/xml">
         <button type="button" class="secondary" id="sample">Use the sample CSV</button>
       </div>
     </div>
+  </fieldset>
+
+  <fieldset class="box" id="batch" hidden aria-live="polite">
+    <legend>Your files</legend>
+    <p class="verdict" id="batch-verdict"></p>
+    <p class="facts">Pick a file to see its full result.</p>
+    <ul class="file-list" id="batch-list"></ul>
+    <p class="warn-label" id="batch-warn-label" hidden>Files that clash</p>
+    <ul class="problems warnings" id="batch-warnings" hidden></ul>
   </fieldset>
 
   <fieldset class="box" id="result" hidden aria-live="polite">

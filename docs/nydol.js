@@ -561,6 +561,50 @@
     return ruleCheck(treeFromDom(doc.documentElement));
   }
 
+  // PRC number and week ending date of one upload file. null when it is not readable.
+  function headerOf(text, Parser) {
+    var problems = [];
+    var note = function (m) { problems.push(String(m)); };
+    var doc;
+    try {
+      var parser;
+      try {
+        parser = new Parser({ errorHandler: { warning: function () {}, error: note, fatalError: note } }); // xmldom 0.8
+      } catch (e) {
+        parser = new Parser({ onError: function (level, m) { if (level !== "warning") note(m); } }); // xmldom 0.9 refuses errorHandler
+      }
+      doc = parser.parseFromString(text, "application/xml");
+    } catch (e) {
+      return null;
+    }
+    var bad = doc && doc.getElementsByTagName ? doc.getElementsByTagName("parsererror") : [];
+    if (problems.length || !doc || !doc.documentElement || bad.length) return null;
+    var root = treeFromDom(doc.documentElement);
+    if (root.tag !== "ProjectRollup") return null;
+    return { prc: root.val("prcNumber") || "", week: root.val("weekEndingDate") || "" };
+  }
+
+  // Warnings about upload files that clash. items: [{name, header}] in order; header may be null.
+  // prlxml/nydol.py across() gives the same lines.
+  function acrossFiles(items) {
+    var out = [];
+    var ok = items.filter(function (it) { return it.header && it.header.prc; });
+    var day = /^[0-9]{4}-[0-9]{2}-[0-9]{2}/;
+    for (var i = 0; i < ok.length; i++) {
+      var a = ok[i].name, ha = ok[i].header;
+      for (var j = i + 1; j < ok.length; j++) {
+        var b = ok[j].name, hb = ok[j].header;
+        if (ha.prc !== hb.prc) continue;
+        var m = day.exec(ha.week), n = day.exec(hb.week);
+        if (m && n && m[0] === n[0]) {
+          out.push(a + " and " + b + " are both PRC " + ha.prc + ", week ending " + m[0] +
+            ". The state takes one file per project per week; if one is not a correction of the other, check the week");
+        }
+      }
+    }
+    return out;
+  }
+
   // samples/ny/week1.csv; tests/test_nydol.py checks the two match.
   var SAMPLE_CSV = [
     "prc_number,week_ending,last_name,first_name,middle_name,ssn_last4,date_of_birth,apprentice,address1,address2,city,state,zip,country,gross_earnings,net_wages,deductions,work_category,st_rate,ot_rate,health,pension,training,other,other_explanation,work_date,st_hours,ot_hours",
@@ -583,6 +627,8 @@
     convertCsv: convertCsv,
     checkXml: checkXml,
     ruleCheck: ruleCheck,
+    headerOf: headerOf,
+    acrossFiles: acrossFiles,
     SAMPLE_CSV: SAMPLE_CSV,
     TEMPLATE_CSV: SAMPLE_CSV.split("\n")[0] + "\n"
   };

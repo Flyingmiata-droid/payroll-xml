@@ -759,6 +759,49 @@
     return doc;
   }
 
+  // The fields that place one payroll among others. null when the text is not readable Payroll XML.
+  var HEADER = [["vendor", "vendorID"], ["contract", "contractID"], ["number", "payrollNumber"],
+    ["begin", "payrollBeginDate"], ["end", "payrollEndDate"]];
+  function headerOf(text, DOMParserImpl) {
+    var doc;
+    try {
+      doc = parseXml(text, DOMParserImpl);
+    } catch (e) {
+      return null;
+    }
+    var root = doc.documentElement;
+    if (root.localName !== "Payroll" || root.namespaceURI !== PRL_NS) return null;
+    var h = {};
+    HEADER.forEach(function (f) { h[f[0]] = t(root, f[1]); });
+    return h;
+  }
+
+  // Warnings about files that clash with each other. items: [{name, header}] in order; header may be null.
+  // prlxml/check.py across() gives the same lines.
+  function acrossFiles(items) {
+    var out = [];
+    var ok = items.filter(function (it) { return it.header && it.header.contract; });
+    for (var i = 0; i < ok.length; i++) {
+      var a = ok[i].name, ha = ok[i].header;
+      for (var j = i + 1; j < ok.length; j++) {
+        var b = ok[j].name, hb = ok[j].header;
+        if (ha.vendor !== hb.vendor || ha.contract !== hb.contract) continue;
+        var who = "contract " + ha.contract + (ha.vendor ? ", vendor " + ha.vendor : "");
+        if (ha.number && ha.number === hb.number) {
+          out.push(a + " and " + b + " are both payroll number " + ha.number + " for " + who + ". If one is not a correction of the other, renumber it");
+          continue;
+        }
+        var a0 = parseDate(ha.begin), a1 = parseDate(ha.end), b0 = parseDate(hb.begin), b1 = parseDate(hb.end);
+        if (a0 === null || a1 === null || b0 === null || b1 === null) continue;
+        if (a0 <= b1 && b0 <= a1) {
+          out.push(a + " (payroll " + ha.number + ", " + ha.begin.slice(0, 10) + " to " + ha.end.slice(0, 10) + ") and " + b +
+            " (payroll " + hb.number + ", " + hb.begin.slice(0, 10) + " to " + hb.end.slice(0, 10) + ") cover the same days for " + who);
+        }
+      }
+    }
+    return out;
+  }
+
   // Returns {errors, warnings}, two lists of plain-English lines.
   // An error is something the field definitions require or an import rejects.
   // A warning is something a state reviewer would question; the file may still import.
@@ -1108,6 +1151,8 @@
     convertCsv: convertCsv,
     checkXml: checkXml,
     scanXml: scanXml,
+    headerOf: headerOf,
+    acrossFiles: acrossFiles,
     OPTIONAL: OPTIONAL,
     SAMPLE_CSV: SAMPLE_CSV,
     TEMPLATE_CSV: REQUIRED.concat(OPTIONAL).join(",") + "\n"

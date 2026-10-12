@@ -39,13 +39,19 @@ Warnings are things a state reviewer would question, or that some states reject 
     python -m prlxml.convert samples/week1.csv -o week1.xml
     python -m prlxml.check week1.xml
 
+### Several weeks at once
+
+    python -m prlxml.check week*.xml
+
+`check` takes as many files as you give it. It checks each one, then warns when two files for the same vendor and contract carry the same payroll number, or cover any of the same days. Those are warnings: a correction can share a week on purpose. The exit code is 1 when any file has an error. The browser page does the same when you drop several files at once.
+
 Needs Python 3.10 or newer and `lxml`.
 
 ## In your browser
 
 Use it at https://flyingmiata-droid.github.io/payroll-xml/
 
-`docs/index.html` is the same converter and the same rule checks as one web page. Open it, drop a CSV or a Payroll XML file, and download the XML. Everything runs in the browser tab. The page sends nothing anywhere, and its content security policy blocks every outside request, so SSNs stay on the machine.
+`docs/index.html` is the same converter and the same rule checks as one web page. Open it, drop a CSV or a Payroll XML file, and download the XML. Drop several and it lists each file's result, plus any two files that clash. Everything runs in the browser tab. The page sends nothing anywhere, and its content security policy blocks every outside request, so SSNs stay on the machine.
 
 The page does not run the schema check, because the AASHTO schema files are not redistributed here. For that, use the Python tool or the official online validator at https://xml.aashtowareproject.org/resourcekit/validator.html.
 
@@ -72,6 +78,8 @@ Since January 1, 2026, New York has required contractors and subcontractors on p
     python -m prlxml.fetch_schemas ny
     python -m prlxml.nydol convert samples/ny/week1.csv -o week1.xml
     python -m prlxml.nydol check week1.xml
+
+`nydol check` also takes several files. It warns when two of them carry the same PRC number and week ending date.
 
 In the browser: https://flyingmiata-droid.github.io/payroll-xml/ny.html (`docs/ny.html`). It has the same converter and rules as the Python tool, without the schema check. Nothing leaves the tab. `tests/test_nydol.py` holds the page and the Python tool to the same answers.
 
