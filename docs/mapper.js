@@ -20,7 +20,9 @@
     "craft_code", "labor_class", "project_id", "apprentice", "st_rate", "ot_rate",
     "work_date", "st_hours", "ot_hours",
     "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions",
-    "project_gross", "lump_sum", "apprentice_id", "apprentice_pct"
+    "project_gross", "lump_sum", "apprentice_id", "apprentice_pct",
+    "health_rate", "vacation_rate", "apprenticeship_rate", "pension_rate", "other1_rate", "other2_rate", "fringe_benefits",
+    "health_program", "vacation_program", "apprenticeship_program", "pension_program", "other1_program", "other2_program"
   ];
   var MONEY_FIELDS = ["gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum"];
   var TAX_FIELDS = ["fica", "federal_tax", "state_tax", "medicare"];
@@ -1050,7 +1052,7 @@
   }
 
   function csvCell(v) {
-    v = String(v);
+    v = v === undefined || v === null ? "" : String(v); // columns the mapper does not fill stay blank
     return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
   }
 

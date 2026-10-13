@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,6 +58,22 @@ def _with(cols, garcia, nguyen):
     """The sample with optional columns added. garcia and nguyen are the values for each person's rows."""
     head = HEADER + "," + ",".join(cols)
     return _csv([head] + [d + "," + ",".join(garcia) for d in DATA[:5]] + [d + "," + ",".join(nguyen) for d in DATA[5:]])
+
+
+PROGRAMS = [
+    "Laborers Health Fund | 55-1234 | Ann Lee | 608-555-0100",
+    "Laborers Pension Fund | 55-9876 | Ann Lee | 608-555-0100",
+    "Laborers Annuity | A-77 | Bob Ray | 608-555-0199 | 201",
+]
+
+
+def _plan_funds():
+    """Plan Funds: three programs, rates per line, and the fringe paid. Garcia works 41 hours, Nguyen 40."""
+    rows = [_swap(d, "fringe_type", "Plan Funds") for d in DATA]
+    cols = ["health_rate", "pension_rate", "other1_rate", "fringe_benefits", "health_program", "pension_program", "other1_program"]
+    garcia = ["8.10", "6.25", "", "588.35"] + PROGRAMS
+    nguyen = ["8.10", "6.25", "1.00", "614.00"] + PROGRAMS
+    return _csv([HEADER + "," + ",".join(cols)] + [d + "," + ",".join(garcia) for d in rows[:5]] + [d + "," + ",".join(nguyen) for d in rows[5:]])
 
 
 def csv_cases():
@@ -118,6 +135,11 @@ def csv_cases():
     c["c20_rate_decimals.csv"] = _csv([HEADER] + [_swap(_swap(d, "st_rate", "28.505"), "ot_rate", "42.7575") for d in DATA[:5]] + DATA[5:])
     c["c21_rate_more_places_than_allowed.csv"] = _csv([HEADER] + [_swap(_swap(d, "st_rate", "28.50049"), "ot_rate", "42.757549") for d in DATA[:5]] + DATA[5:])
     c["e16_huge_number.csv"] = _csv([HEADER] + [_swap(d, "gross_pay", "1E+300") for d in DATA[:5]] + DATA[5:])
+    c["c22_plan_funds.csv"] = _plan_funds()
+    c["c23_fringe_rate_zero_left_out.csv"] = _with(["health_rate", "fringe_benefits"], ["0", ""], ["0.00", "0"])
+    c["e18_fringe_rate_three_decimals.csv"] = _with(["health_rate"], ["8.125"], [""])
+    c["e19_program_missing_a_part.csv"] = _with(["health_program"], ["Health fund | 55-1234 | Ann Lee"], ["Health fund | 55-1234 | Ann Lee"])
+    c["e20_program_differs.csv"] = _with(["health_program"], [PROGRAMS[0]], ["Other fund | 55-1234 | Ann Lee | 608-555-0100"])
     c["e17_rate_differs_past_cents.csv"] = _csv([HEADER] + [_swap(d, "st_rate", "28.505") for d in DATA[:4]] + [_swap(DATA[4], "st_rate", "28.506")] + DATA[5:])
     return c
 
@@ -474,3 +496,51 @@ def test_rates_keep_their_decimals(tmp_path):
 def test_sample_has_no_warnings():
     errs, warns = check.scan(ROOT / "samples/week1.xml")
     assert errs == [] and warns == []
+
+
+def test_plan_funds_programs_and_rates(tmp_path):
+    """Fringe programs go at the top, one per type; rates and the fringe paid go on each labor line. The file passes the schema and the rules."""
+    f = tmp_path / "c22.csv"
+    f.write_text(csv_cases()["c22_plan_funds.csv"], encoding="utf-8")
+    out = tmp_path / "c22.xml"
+    convert.convert(f, out)
+    root = etree.parse(str(out)).getroot()
+    progs = root.findall(f"{P}PayrollBenefitPrograms/{P}PayrollBenefitProgram")
+    assert [p.findtext(f"{P}benefitProgramType") for p in progs] == ["Fringe Health/Welfare", "Fringe Pension", "Fringe Other 1"]
+    assert [p.findtext(f"{P}benefitProgramClass") for p in progs] == [None, None, "201"]
+    assert progs[0].findtext(f"{P}trusteeContactPhoneNumber") == "608-555-0100"
+    garcia, nguyen = _lab(root, 0), _lab(root, 1)
+    assert _amt(garcia, "healthWellfareRate").text == "8.10" and _amt(garcia, "pensionRate").text == "6.25"
+    assert garcia.find(f"{P}other1Rate") is None and _amt(nguyen, "other1Rate").text == "1.00"
+    assert _amt(garcia, "fringeBenefits").text == "588.35" and _amt(nguyen, "fringeBenefits").text == "614.00"
+    r = subprocess.run([sys.executable, "-m", "prlxml.check", str(out), "--schemas", str(ROOT / "schemas")], cwd=ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, r.stdout + r.stderr
+    errs, warns = check.scan(out)
+    assert errs == [] and warns == [], (errs, warns)
+
+
+def test_fringe_inputs_that_stop_convert(tmp_path):
+    cases = csv_cases()
+    want = {
+        "e18_fringe_rate_three_decimals.csv": "row 2: health_rate has more than 2 decimals: '8.125'",
+        "e19_program_missing_a_part.csv": "row 2: health_program needs name | account ID | trustee | phone",
+        "e20_program_differs.csv": "column health_program must be the same on every row",
+    }
+    for name, start in want.items():
+        f = tmp_path / name
+        f.write_text(cases[name], encoding="utf-8")
+        try:
+            convert.convert(f, tmp_path / "x.xml")
+        except convert.ConvertError as e:
+            assert str(e).startswith(start), (name, str(e))
+        else:
+            raise AssertionError(name + " converted")
+
+
+def test_zero_fringe_rate_is_left_out(tmp_path):
+    f = tmp_path / "c23.csv"
+    f.write_text(csv_cases()["c23_fringe_rate_zero_left_out.csv"], encoding="utf-8")
+    convert.convert(f, tmp_path / "c23.xml")
+    xml = (tmp_path / "c23.xml").read_text(encoding="utf-8")
+    assert "healthWellfareRate" not in xml and "PayrollBenefitPrograms" not in xml
+    assert "<fringeBenefits>" in xml  # Nguyen's 0 fringe paid is written as typed

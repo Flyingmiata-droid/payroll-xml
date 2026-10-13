@@ -25,7 +25,20 @@
   // Optional columns. Leave them out or blank when they do not apply.
   // project_gross: pay for this contract and project only. Blank means rates times hours plus lump_sum.
   // lump_sum: cash fringe or other cash paid on this line. apprentice_id, apprentice_pct: needed when apprentice is yes.
-  var OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"];
+  // Fringe paid to plans (Plan Funds): an hourly rate per program type, and fringe_benefits, the fringe paid on this line.
+  var FRINGE_RATE_COLS = [
+    ["health_rate", "healthWellfareRate"], ["vacation_rate", "vacationHolidayRate"], ["apprenticeship_rate", "apprenticeshipFundRate"],
+    ["pension_rate", "pensionRate"], ["other1_rate", "other1Rate"], ["other2_rate", "other2Rate"]
+  ];
+  var LINE_OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"]
+    .concat(FRINGE_RATE_COLS.map(function (f) { return f[0]; }), ["fringe_benefits"]);
+  // One fringe benefit program per type, same on every row: name | account ID | trustee | phone, and | class (needed for other 1 and 2).
+  var PROGRAM_COLS = [
+    ["health_program", "Fringe Health/Welfare"], ["vacation_program", "Fringe Vacation/Holiday"],
+    ["apprenticeship_program", "Fringe Apprenticeship Fund"], ["pension_program", "Fringe Pension"],
+    ["other1_program", "Fringe Other 1"], ["other2_program", "Fringe Other 2"]
+  ];
+  var OPTIONAL = LINE_OPTIONAL.concat(PROGRAM_COLS.map(function (p) { return p[0]; }));
 
   function ConvertError(message) {
     this.name = "ConvertError";
@@ -230,8 +243,9 @@
 
   var DATE_COLS = ["period_begin", "period_end", "work_date"];
   var SAME_FOR_EMPLOYEE = ["middle_initial", "gender", "ethnicity"];
-  var SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"].concat(OPTIONAL);
-  var NUMBER_COLS = ["st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct"];
+  var SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"].concat(LINE_OPTIONAL);
+  var NUMBER_COLS = ["st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct", "fringe_benefits"]
+    .concat(FRINGE_RATE_COLS.map(function (f) { return f[0]; }));
   var US_DATE = /^([0-9]{1,2})\/([0-9]{1,2})\/([0-9]{4})$/;
 
   // Excel saves 2026-10-04 back out as 10/4/2026. Read both.
@@ -352,6 +366,29 @@
     return toCents(d);
   }
 
+  // A fringe rate in dollars and cents (field definitions: ###.##), null when blank or 0. More decimals stop the run instead of rounding the rate.
+  function fringeRate(value, field, rowNo) {
+    var v = (value || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    if (v === "") return null;
+    var d = parseDecimal(v);
+    if (d === null) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value));
+    var c = toCents(d);
+    if (!decEq(d, { m: c, s: 2 })) {
+      throw new ConvertError("row " + rowNo + ": " + field + " has more than 2 decimals: " + pyRepr(value) + ". The field definitions take a fringe rate in dollars and cents.");
+    }
+    return c === 0n ? null : c;
+  }
+
+  // name | account ID | trustee | phone, and an optional | class. null when blank.
+  function program(value, field, rowNo) {
+    if (!value.trim()) return null;
+    var parts = value.split("|").map(function (p) { return p.trim(); });
+    if ((parts.length !== 4 && parts.length !== 5) || !parts.slice(0, 4).every(function (p) { return p !== ""; })) {
+      throw new ConvertError("row " + rowNo + ": " + field + " needs name | account ID | trustee | phone, plus | class for other 1 and 2, got " + pyRepr(value.trim()));
+    }
+    return parts;
+  }
+
   function boolText(value) {
     var v = (value || "").trim().toLowerCase();
     return ["1", "y", "yes", "true", "t"].indexOf(v) >= 0 ? "true" : "false";
@@ -416,7 +453,7 @@
 
   function buildXml(rows) {
     var first = rows[0];
-    HEADER_COLS.forEach(function (c) {
+    HEADER_COLS.concat(PROGRAM_COLS.map(function (p) { return p[0]; })).forEach(function (c) {
       var seen = {};
       var vals = [];
       rows.forEach(function (r) {
@@ -444,6 +481,22 @@
     root.add("payrollBeginDate", first.period_begin.trim());
     root.add("payrollEndDate", first.period_end.trim());
     root.add("fringeBenefitPaymentType", fringeText(first.fringe_type));
+    var programs = [];
+    PROGRAM_COLS.forEach(function (pc) {
+      var parts = program(first[pc[0]], pc[0], first._row !== undefined ? first._row : 2);
+      if (parts) programs.push([pc[1], parts]);
+    });
+    if (programs.length) {
+      var progsEl = root.add("PayrollBenefitPrograms");
+      programs.forEach(function (pr) {
+        var prog = progsEl.add("PayrollBenefitProgram");
+        ["benefitProgramName", "benefitAccountID", "trusteeContactPerson", "trusteeContactPhoneNumber"].forEach(function (tag, i) {
+          prog.add(tag, pr[1][i]);
+        });
+        prog.add("benefitProgramType", pr[0]);
+        if (pr[1].length === 5 && pr[1][4]) prog.add("benefitProgramClass", pr[1][4]);
+      });
+    }
 
     // group: employee -> labor class -> day rows, in first-seen order
     var employees = new Map();
@@ -515,6 +568,10 @@
         var otRate = rate(l0.ot_rate, "ot_rate", n0);
         currency(lab, "straightTimeHourlyRate", stRate);
         currency(lab, "overtimeHourlyRate", otRate);
+        FRINGE_RATE_COLS.forEach(function (fc) {
+          var fr = fringeRate(l0[fc[0]], fc[0], n0);
+          if (fr !== null) currency(lab, fc[1], fr);
+        });
         var lump = dec(l0.lump_sum, "lump_sum", n0);
         if (l0.lump_sum.trim()) currency(lab, "lumpSumPayment", lump);
         lab.add("apprentice", boolText(l0.apprentice));
@@ -542,6 +599,7 @@
         currency(lab, "grossPay", dec(l0.gross_pay, "gross_pay", n0));
         currency(lab, "totalDeductions", dec(l0.total_deductions, "total_deductions", n0));
         currency(lab, "netPay", dec(l0.net_pay, "net_pay", n0));
+        if (l0.fringe_benefits.trim()) currency(lab, "fringeBenefits", dec(l0.fringe_benefits, "fringe_benefits", n0));
         // Required by the field definitions though the schema marks it optional. The state spreadsheets fill it in too.
         var project = l0.project_gross.trim()
           ? dec(l0.project_gross, "project_gross", n0)

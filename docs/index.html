@@ -300,6 +300,9 @@
         <tr><td><code>project_gross</code></td><td>Optional. Pay for this contract and project only. Leave it out and the tool uses the rates times the hours, plus <code>lump_sum</code>.</td></tr>
         <tr><td><code>lump_sum</code></td><td>Optional. Cash fringe or other cash paid on this line.</td></tr>
         <tr><td><code>apprentice_id</code>, <code>apprentice_pct</code></td><td>Needed when <code>apprentice</code> is Y: the apprentice ID and the wage percentage, like 60.</td></tr>
+        <tr><td><code>health_rate</code>, <code>vacation_rate</code>, <code>apprenticeship_rate</code>, <code>pension_rate</code>, <code>other1_rate</code>, <code>other2_rate</code></td><td>Optional, for Plan Funds. The hourly rate paid into each kind of plan for this worker and labor class, in dollars and cents. Blank or 0 leaves it out.</td></tr>
+        <tr><td><code>fringe_benefits</code></td><td>Optional. The fringe paid on this line for the week.</td></tr>
+        <tr><td><code>health_program</code>, <code>vacation_program</code>, <code>apprenticeship_program</code>, <code>pension_program</code>, <code>other1_program</code>, <code>other2_program</code></td><td>Optional, one per kind of plan, same on every row: <code>name | account ID | trustee | phone</code>. Other 1 and Other 2 also need <code>| class</code> at the end.</td></tr>
       </tbody>
     </table>
   </div>
@@ -338,7 +341,7 @@
   </ul>
 
   <h2>What it does not check</h2>
-  <p>Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert does not write fringe benefit programs or fringe rates yet, so a Plan Funds payroll needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.</p>
+  <p>Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert writes fringe programs and rates, but not fringe benefit exceptions, so a Plan Funds with Exceptions payroll still needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.</p>
   <p>The full Payroll XML schema. That check needs AASHTO's schema files, which this page does not carry. Run your file through the <a href="https://xml.aashtowareproject.org/resourcekit/validator.html" rel="noopener noreferrer" target="_blank">official online validator</a> before you upload, or use the <a href="https://github.com/Flyingmiata-droid/payroll-xml" rel="noopener noreferrer" target="_blank">Python version</a> of this tool, which checks the schema and the rules together.</p>
 
   <footer>

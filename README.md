@@ -107,6 +107,12 @@ Totals columns (same on every row for one employee and labor class): `gross_pay,
 
 Optional columns (leave them out, or blank, when they do not apply; same on every row for one employee and labor class): `project_gross` is the pay for this contract and project only, `lump_sum` is cash fringe or other cash paid on the line, and `apprentice_id` and `apprentice_pct` are needed when `apprentice` is yes.
 
+Fringe paid to plans (Plan Funds), all optional:
+
+- `health_rate`, `vacation_rate`, `apprenticeship_rate`, `pension_rate`, `other1_rate`, `other2_rate`: the hourly rate paid into each kind of plan for this employee and labor class. Dollars and cents only; a rate with a third decimal stops convert rather than being rounded. Blank or 0 leaves the rate out.
+- `fringe_benefits`: the fringe paid on this line for the week.
+- `health_program`, `vacation_program`, `apprenticeship_program`, `pension_program`, `other1_program`, `other2_program`: one program per kind, same on every row, written as `name | account ID | trustee | phone`. Add `| class` for Other 1 and Other 2, which the field definitions require there. For example `Laborers Health Fund | 55-1234 | Ann Lee | 608-555-0100`.
+
 Rows where every cell is blank are skipped. Spreadsheet exports often end with a few rows of bare commas.
 
 Excel habits it handles: dates saved as 10/4/2026 are read as 2026-10-04, a plain "CSV" save (Windows-1252) is read as well as "CSV UTF-8", and float leftovers like -1.1E-13 come out as 0.00. A file that mixes two text encodings is refused, so accented names never come out garbled. Excel can also turn a project number that looks like a date into a date; format that column as Text before you save.
@@ -115,7 +121,7 @@ Excel habits it handles: dates saved as 10/4/2026 are read as 2026-10-04, a plai
 
 ## What it does not check
 
-Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert does not write fringe benefit programs or fringe rates yet, so a Plan Funds payroll needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.
+Your state's code lists, whether the project is on the contract, and the rates in the wage decision. The check compares the file's own numbers with each other, not with the prevailing wage. Convert writes fringe programs and rates, but not fringe benefit exceptions, so a Plan Funds with Exceptions payroll still needs those from your payroll system. Convert also takes one straight time and overtime rate pair per worker and labor class. A double time or shift rate needs its own labor line, which the CSV cannot hold yet, so convert stops and names the row.
 
 ## Where this fits
 

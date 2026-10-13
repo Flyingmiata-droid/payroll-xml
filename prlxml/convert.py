@@ -23,11 +23,23 @@ REQUIRED = HEADER_COLS + EMP_COLS + LABOR_COLS + DAY_COLS + TOTAL_COLS
 # Optional columns. Leave them out or blank when they do not apply.
 # project_gross: pay for this contract and project only. Blank means rates times hours plus lump_sum.
 # lump_sum: cash fringe or other cash paid on this line. apprentice_id, apprentice_pct: needed when apprentice is yes.
-OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"]
+# Fringe paid to plans (Plan Funds): an hourly rate per program type, and fringe_benefits, the fringe paid on this line.
+FRINGE_RATE_COLS = [
+    ("health_rate", "healthWellfareRate"), ("vacation_rate", "vacationHolidayRate"), ("apprenticeship_rate", "apprenticeshipFundRate"),
+    ("pension_rate", "pensionRate"), ("other1_rate", "other1Rate"), ("other2_rate", "other2Rate"),
+]
+LINE_OPTIONAL = ["project_gross", "lump_sum", "apprentice_id", "apprentice_pct"] + [c for c, _ in FRINGE_RATE_COLS] + ["fringe_benefits"]
+# One fringe benefit program per type, same on every row: name | account ID | trustee | phone, and | class (needed for other 1 and 2).
+PROGRAM_COLS = [
+    ("health_program", "Fringe Health/Welfare"), ("vacation_program", "Fringe Vacation/Holiday"),
+    ("apprenticeship_program", "Fringe Apprenticeship Fund"), ("pension_program", "Fringe Pension"),
+    ("other1_program", "Fringe Other 1"), ("other2_program", "Fringe Other 2"),
+]
+OPTIONAL = LINE_OPTIONAL + [c for c, _ in PROGRAM_COLS]
 DATE_COLS = ["period_begin", "period_end", "work_date"]
 SAME_FOR_EMPLOYEE = ["middle_initial", "gender", "ethnicity"]
-SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"] + OPTIONAL
-NUMBER_COLS = {"st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct"}
+SAME_FOR_LABOR = ["apprentice", "st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "other_deductions"] + LINE_OPTIONAL
+NUMBER_COLS = {"st_rate", "ot_rate", "gross_pay", "total_deductions", "net_pay", "fica", "federal_tax", "state_tax", "medicare", "project_gross", "lump_sum", "apprentice_pct", "fringe_benefits"} | {c for c, _ in FRINGE_RATE_COLS}
 
 ENCODING_HELP = "Cannot tell this file's text encoding, so accented names could come out wrong. In Excel, save it again with File, Save As, CSV UTF-8."
 _BAD_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
@@ -75,6 +87,27 @@ def _rate(value: str, field: str, row_no: int) -> Decimal:
     if d is None:
         return Decimal("0.00")
     return _places(d, min(max(-d.as_tuple().exponent, 2), RATE_PLACES[field]))
+
+
+def _fringe_rate(value: str, field: str, row_no: int):
+    """A fringe rate in dollars and cents (field definitions: ###.##), None when blank or 0. More decimals stop the run instead of rounding the rate."""
+    d = _parse(value, field, row_no)
+    if d is None:
+        return None
+    q = _places(d, 2)
+    if q != d:
+        raise ConvertError(f"row {row_no}: {field} has more than 2 decimals: {value!r}. The field definitions take a fringe rate in dollars and cents.")
+    return None if q == 0 else q
+
+
+def _program(value: str, field: str, row_no: int):
+    """name | account ID | trustee | phone, and an optional | class. None when blank."""
+    if not value.strip():
+        return None
+    parts = [p.strip() for p in value.split("|")]
+    if len(parts) not in (4, 5) or not all(parts[:4]):
+        raise ConvertError(f"row {row_no}: {field} needs name | account ID | trustee | phone, plus | class for other 1 and 2, got {value.strip()!r}")
+    return parts
 
 
 def _bool(value: str) -> str:
@@ -162,7 +195,7 @@ def read_rows(path: Path):
 
 def build_tree(rows):
     first = rows[0]
-    for c in HEADER_COLS:
+    for c in HEADER_COLS + [c for c, _ in PROGRAM_COLS]:
         vals = {(r[c] or "").strip() for r in rows}
         if len(vals) != 1:
             raise ConvertError(f"column {c} must be the same on every row, found {sorted(vals)}")
@@ -177,6 +210,17 @@ def build_tree(rows):
     _el(root, "payrollBeginDate", first["period_begin"].strip())
     _el(root, "payrollEndDate", first["period_end"].strip())
     _el(root, "fringeBenefitPaymentType", _fringe(first["fringe_type"]))
+    programs = [(t, _program(first[c], c, first.get("_row", 2))) for c, t in PROGRAM_COLS]
+    programs = [(t, p) for t, p in programs if p]
+    if programs:
+        progs_el = _el(root, "PayrollBenefitPrograms")
+        for ptype, parts in programs:
+            prog = _el(progs_el, "PayrollBenefitProgram")
+            for tag, text in zip(("benefitProgramName", "benefitAccountID", "trusteeContactPerson", "trusteeContactPhoneNumber"), parts):
+                _el(prog, tag, text)
+            _el(prog, "benefitProgramType", ptype)
+            if len(parts) == 5 and parts[4]:
+                _el(prog, "benefitProgramClass", parts[4])
 
     # group: employee -> labor class -> day rows
     employees = OrderedDict()
@@ -240,6 +284,10 @@ def build_tree(rows):
             ot_rate = _rate(l0["ot_rate"], "ot_rate", n0)
             _currency(lab, "straightTimeHourlyRate", st_rate)
             _currency(lab, "overtimeHourlyRate", ot_rate)
+            for col, tag in FRINGE_RATE_COLS:
+                fr = _fringe_rate(l0[col], col, n0)
+                if fr is not None:
+                    _currency(lab, tag, fr)
             lump = _dec(l0["lump_sum"], "lump_sum", n0)
             if l0["lump_sum"].strip():
                 _currency(lab, "lumpSumPayment", lump)
@@ -266,6 +314,8 @@ def build_tree(rows):
             _currency(lab, "grossPay", _dec(l0["gross_pay"], "gross_pay", n0))
             _currency(lab, "totalDeductions", _dec(l0["total_deductions"], "total_deductions", n0))
             _currency(lab, "netPay", _dec(l0["net_pay"], "net_pay", n0))
+            if l0["fringe_benefits"].strip():
+                _currency(lab, "fringeBenefits", _dec(l0["fringe_benefits"], "fringe_benefits", n0))
             # Required by the field definitions though the schema marks it optional. The state spreadsheets fill it in too.
             if l0["project_gross"].strip():
                 project = _dec(l0["project_gross"], "project_gross", n0)
