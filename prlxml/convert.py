@@ -46,6 +46,9 @@ _BAD_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\ufffe\uffff]")
 _US_DATE = re.compile(r"([0-9]{1,2})/([0-9]{1,2})/([0-9]{4})")
 # Plain ASCII decimals only, the same numbers docs/prlxml.js accepts.
 _NUM = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+# A comma is a thousands mark only, in groups of three: 1,239.75. Any other comma (8,0 meaning 8.0) is refused, not read as 80.
+_THOUSANDS = re.compile(r"[+-]?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]*)?")
+COMMA_HELP = ". A comma only marks thousands, like 1,239.75. Write a decimal with a dot."
 # The field definitions allow 3 decimals on the straight time rate and 4 on the overtime rate. Rates keep what was typed, up to that.
 RATE_PLACES = {"st_rate": 3, "ot_rate": 4}
 
@@ -56,10 +59,14 @@ class ConvertError(Exception):
 
 def _parse(value: str, field: str, row_no: int):
     """A Decimal, None for a blank cell. Refuses anything that is not a plain number of sane size."""
-    v = (value or "").strip().replace("$", "").replace(",", "")
+    v = (value or "").strip().replace("$", "")
     if v == "":
         return None
     bad = ConvertError(f"row {row_no}: {field} is not a number: {value!r}")
+    if "," in v:
+        if not _THOUSANDS.fullmatch(v):
+            raise ConvertError(f"row {row_no}: {field} is not a number: {value!r}{COMMA_HELP}")
+        v = v.replace(",", "")
     if not _NUM.fullmatch(v):
         raise bad
     d = Decimal(v)

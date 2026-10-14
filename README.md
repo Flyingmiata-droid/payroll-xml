@@ -115,7 +115,7 @@ Fringe paid to plans (Plan Funds), all optional:
 
 Rows where every cell is blank are skipped. Spreadsheet exports often end with a few rows of bare commas.
 
-Excel habits it handles: dates saved as 10/4/2026 are read as 2026-10-04, a plain "CSV" save (Windows-1252) is read as well as "CSV UTF-8", and float leftovers like -1.1E-13 come out as 0.00. A file that mixes two text encodings is refused, so accented names never come out garbled. Excel can also turn a project number that looks like a date into a date; format that column as Text before you save.
+Excel habits it handles: dates saved as 10/4/2026 are read as 2026-10-04, a plain "CSV" save (Windows-1252) is read as well as "CSV UTF-8", float leftovers like -1.1E-13 come out as 0.00, and money saved as $1,239.75 is read as 1239.75. A comma that is not a thousands mark, like 8,0 for eight hours, stops convert instead of being read as 80. A file that mixes two text encodings is refused, so accented names never come out garbled. Excel can also turn a project number that looks like a date into a date; format that column as Text before you save.
 
 `gender` takes Male or Female (M and F are mapped). `fringe_type` takes Cash, Plan Funds, or Plan Funds with Exceptions, in any case. Code values for `ethnicity`, `craft_code` and `labor_class` come from your state's own list. The tool passes them through. It does not invent them. The sample uses Wisconsin's codes (craft 100 Laborers, labor class 101 Laborer Group 1, ethnicity HISP and A-IN) as they appear on the WisDOT spreadsheet template v3.
 

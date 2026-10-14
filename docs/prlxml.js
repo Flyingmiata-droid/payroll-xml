@@ -348,9 +348,23 @@
   // The field definitions allow 3 decimals on the straight time rate and 4 on the overtime rate. Rates keep what was typed, up to that.
   var RATE_PLACES = { st_rate: 3, ot_rate: 4 };
 
+  // A comma is a thousands mark only, in groups of three: 1,239.75. Any other comma (8,0 meaning 8.0) is refused, not read as 80.
+  var THOUSANDS_RE = /^[+-]?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]*)?$/;
+  var COMMA_HELP = ". A comma only marks thousands, like 1,239.75. Write a decimal with a dot.";
+
+  // Strips $ and thousands commas. Throws on a comma that is not a thousands mark.
+  function numText(value, field, rowNo) {
+    var v = (value || "").trim().replace(/\$/g, "");
+    if (v.indexOf(",") >= 0) {
+      if (!THOUSANDS_RE.test(v)) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value) + COMMA_HELP);
+      v = v.replace(/,/g, "");
+    }
+    return v;
+  }
+
   // Returns {m, s}: the rate rounded to at least 2 and at most 3 or 4 places.
   function rate(value, field, rowNo) {
-    var v = (value || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    var v = numText(value, field, rowNo);
     if (v === "") return { m: 0n, s: 2 };
     var d = parseDecimal(v);
     if (d === null) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value));
@@ -359,7 +373,7 @@
   }
 
   function dec(value, field, rowNo) {
-    var v = (value || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    var v = numText(value, field, rowNo);
     if (v === "") return 0n;
     var d = parseDecimal(v);
     if (d === null) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value));
@@ -368,7 +382,7 @@
 
   // A fringe rate in dollars and cents (field definitions: ###.##), null when blank or 0. More decimals stop the run instead of rounding the rate.
   function fringeRate(value, field, rowNo) {
-    var v = (value || "").trim().replace(/\$/g, "").replace(/,/g, "");
+    var v = numText(value, field, rowNo);
     if (v === "") return null;
     var d = parseDecimal(v);
     if (d === null) throw new ConvertError("row " + rowNo + ": " + field + " is not a number: " + pyRepr(value));

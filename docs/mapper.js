@@ -246,7 +246,12 @@
       neg = true;
       s = s.slice(1, -1);
     }
-    s = s.replace(/[$,\s]/g, "");
+    s = s.replace(/[$\s]/g, "");
+    // A comma is a thousands mark only, in groups of three. 8,0 is not 80: it is not a number.
+    if (s.indexOf(",") >= 0) {
+      if (!/^[+-]?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]*)?-?$/.test(s)) return null;
+      s = s.replace(/,/g, "");
+    }
     if (/-$/.test(s)) {
       neg = !neg;
       s = s.slice(0, -1);

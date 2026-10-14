@@ -141,6 +141,9 @@ def csv_cases():
     c["e19_program_missing_a_part.csv"] = _with(["health_program"], ["Health fund | 55-1234 | Ann Lee"], ["Health fund | 55-1234 | Ann Lee"])
     c["e20_program_differs.csv"] = _with(["health_program"], [PROGRAMS[0]], ["Other fund | 55-1234 | Ann Lee | 608-555-0100"])
     c["e17_rate_differs_past_cents.csv"] = _csv([HEADER] + [_swap(d, "st_rate", "28.505") for d in DATA[:4]] + [_swap(DATA[4], "st_rate", "28.506")] + DATA[5:])
+    # A decimal comma must stop the run: 8,0 read as 80 hours would pass the schema and most rules.
+    c["e21_decimal_comma_hours.csv"] = _csv([HEADER] + DATA[:4] + [_swap(DATA[4], "ot_hours", '"1,5"')] + DATA[5:])
+    c["e22_comma_not_in_threes.csv"] = _csv([HEADER] + [_swap(d, "gross_pay", '"1,23,9.75"') for d in DATA[:5]] + DATA[5:])
     return c
 
 
@@ -522,6 +525,8 @@ def test_plan_funds_programs_and_rates(tmp_path):
 def test_fringe_inputs_that_stop_convert(tmp_path):
     cases = csv_cases()
     want = {
+        "e21_decimal_comma_hours.csv": "row 6: ot_hours is not a number: '1,5'. A comma only marks thousands, like 1,239.75. Write a decimal with a dot.",
+        "e22_comma_not_in_threes.csv": "row 2: gross_pay is not a number: '1,23,9.75'. A comma only marks thousands",
         "e18_fringe_rate_three_decimals.csv": "row 2: health_rate has more than 2 decimals: '8.125'",
         "e19_program_missing_a_part.csv": "row 2: health_program needs name | account ID | trustee | phone",
         "e20_program_differs.csv": "column health_program must be the same on every row",
